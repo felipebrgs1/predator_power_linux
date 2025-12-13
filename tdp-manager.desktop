@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=TDP Manager
+Comment=Intel CPU Power Limit Manager
+GenericName=Power Manager
+Exec=python3 /home/felipeb/work/unpackcpu/tdp-manager-gui.py
+Icon=preferences-system-power
+Terminal=false
+Type=Application
+Categories=System;Settings;HardwareSettings;
+Keywords=tdp;power;cpu;intel;throttle;performance;
+StartupNotify=true

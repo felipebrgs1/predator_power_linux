@@ -1,0 +1,26 @@
+# TDP Manager - Gitignore
+
+# Logs
+*.log
+/tmp/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Config files (user-specific)
+.config/
+
+# Build artifacts
+*.o
+*.ko
+*.mod.c
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
