@@ -21,11 +21,17 @@ NC='\033[0m' # No Color
 # platform_profile: low-power, quiet, balanced (Acer EC modes)
 declare -A PROFILES=(
     ["silent"]="15 25 powersave power quiet"                    # PL1=15W - Silent mode
-    ["balanced"]="60 80 powersave balance_performance balanced" # PL1=60W - Balanced
+    ["quiet70"]="35 50 powersave balance_power quiet"           # PL1=35W - Fans max 70% (~3850RPM)
+    ["balanced"]="50 65 powersave balance_performance balanced" # PL1=50W - Balanced
     ["performance"]="80 115 performance performance balanced"   # PL1=80W - Performance mode
     ["turbo"]="100 140 performance performance balanced"        # PL1=100W - Maximum performance
     ["extreme"]="115 160 performance performance balanced"      # PL1=115W - Maximum (careful!)
 )
+
+# Fan monitoring paths (Acer WMI hwmon)
+FAN1_PATH="/sys/class/hwmon/hwmon9/fan1_input"
+FAN2_PATH="/sys/class/hwmon/hwmon9/fan2_input"
+FAN_MAX_RPM=5500  # Approximate max RPM for Acer Predator fans
 
 # Acer EC Platform Profile path
 PLATFORM_PROFILE_PATH="/sys/class/platform-profile/platform-profile-0/profile"
@@ -74,6 +80,32 @@ get_current_power() {
     local pl2_w=$((pl2_uw / 1000000))
     
     echo "$pl1_w $pl2_w"
+}
+
+# Read fan speeds (RPM)
+get_fan_speeds() {
+    local fan1_rpm=$(cat "$FAN1_PATH" 2>/dev/null)
+    local fan2_rpm=$(cat "$FAN2_PATH" 2>/dev/null)
+    
+    if [[ -z "$fan1_rpm" ]]; then
+        fan1_rpm=0
+    fi
+    if [[ -z "$fan2_rpm" ]]; then
+        fan2_rpm=0
+    fi
+    
+    echo "$fan1_rpm $fan2_rpm"
+}
+
+# Calculate fan percentage
+get_fan_percentage() {
+    local rpm=$1
+    local percent=$((rpm * 100 / FAN_MAX_RPM))
+    # Cap at 100%
+    if [[ $percent -gt 100 ]]; then
+        percent=100
+    fi
+    echo $percent
 }
 
 # Get energy consumption (for monitoring)

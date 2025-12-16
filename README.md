@@ -167,15 +167,35 @@ python3 tdp-manager-gui.py
 ## 🐛 Troubleshooting
 
 ### "Acer EC: unavailable"
-O módulo facer não está carregado ou não foi instalado com `predator_v4=1`:
-```bash
-# Verificar se o módulo está carregado
-lsmod | grep facer
+Isso ocorre quando o módulo `facer` não expõe a interface de controle do perfil. Para corrigir:
 
-# Recarregar com parâmetro correto
-sudo rmmod facer
-sudo insmod /path/to/facer.ko predator_v4=1
-```
+1. **Recompilar o módulo**:
+   ```bash
+   cd acer-predator-turbo-and-rgb-keyboard-linux-module
+   make
+   ```
+
+2. **Instalar com o parâmetro correto**:
+   ```bash
+   # Copiar para o diretório de módulos do kernel atual
+   sudo mkdir -p /lib/modules/$(uname -r)/extra
+   sudo cp src/facer.ko /lib/modules/$(uname -r)/extra/
+   sudo depmod -a
+   ```
+
+3. **Configurar carregamento persistente**:
+   ```bash
+   # Definir parâmetro predator_v4=1 (Essencial para i7-12700H)
+   echo "options facer predator_v4=1" | sudo tee /etc/modprobe.d/facer.conf
+   
+   # Carregar no boot
+   echo "facer" | sudo tee /etc/modules-load.d/facer.conf
+   ```
+
+4. **Reiniciar ou carregar manualmente**:
+   ```bash
+   sudo modprobe facer
+   ```
 
 ### Frequência ainda baixa após mudar perfil
 ```bash
