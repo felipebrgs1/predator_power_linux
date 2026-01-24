@@ -221,7 +221,8 @@ load_facer_module() {
     
     echo -e "${CYAN}Attempting to load acer_thermal_lite module...${NC}"
     # Try the lite version first
-    local mod_path="/home/felipeb/predator_power_linux/acer_thermal_lite/acer_thermal_lite.ko"
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local mod_path="${script_dir}/acer_thermal_lite/acer_thermal_lite.ko"
     if [[ -f "$mod_path" ]]; then
         if insmod "$mod_path" 2>/dev/null; then
             echo -e "${GREEN}✓ acer_thermal_lite loaded successfully!${NC}"
