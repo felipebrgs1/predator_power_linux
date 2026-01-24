@@ -15,7 +15,7 @@
 #define ACER_MISC_SETTING_STATUS_MASK GENMASK_ULL(31, 16)
 #define ACER_PLATFORM_PROFILE_INDEX 0x0B
 
-MODULE_AUTHOR("Antigravity AI (based on facer)");
+MODULE_AUTHOR("FelipeB");
 MODULE_DESCRIPTION("Simplified Acer Predator Thermal Profile Driver");
 MODULE_LICENSE("GPL");
 

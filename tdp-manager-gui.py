@@ -352,6 +352,40 @@ class TDPManagerWindow(Gtk.Window):
 
         def run_action():
             try:
+                if active:
+                    # Generate a dynamic service file for the current location/user
+                    script_dir = os.path.dirname(os.path.abspath(__file__))
+                    service_content = f"""[Unit]
+Description=Predator Auto Turbo Fan Daemon
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 {os.path.join(script_dir, "auto-turbo-daemon.py")}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+"""
+                    tmp_service = "/tmp/auto-turbo.service"
+                    with open(tmp_service, "w") as f:
+                        f.write(service_content)
+
+                    # Install the dynamic service
+                    subprocess.run(
+                        [
+                            "pkexec",
+                            "cp",
+                            tmp_service,
+                            "/etc/systemd/system/auto-turbo.service",
+                        ],
+                        capture_output=True,
+                    )
+                    subprocess.run(
+                        ["pkexec", "systemctl", "daemon-reload"], capture_output=True
+                    )
+
                 subprocess.run(
                     ["pkexec", "systemctl", action, "auto-turbo"], capture_output=True
                 )

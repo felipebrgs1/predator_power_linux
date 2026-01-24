@@ -13,7 +13,7 @@ GPU_HYSTERESIS = 65
 CHECK_INTERVAL = 2  # Seconds
 
 # Paths
-BASE_DIR = "/home/felipeb/predator_power_linux"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SCRIPT_PATH = os.path.join(BASE_DIR, "tdp-manager.sh")
 DESIRED_PROFILE_FILE = "/tmp/tdp_desired_profile"
 

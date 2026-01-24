@@ -2,7 +2,7 @@
 Name=TDP Manager
 Comment=Intel CPU Power Limit Manager
 GenericName=Power Manager
-Exec=python3 /home/felipeb/work/unpackcpu/tdp-manager-gui.py
+Exec=sh -c "python3 \$HOME/predator_power_linux/tdp-manager-gui.py"
 Icon=preferences-system-power
 Terminal=false
 Type=Application
