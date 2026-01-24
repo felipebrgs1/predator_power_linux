@@ -23,7 +23,7 @@ declare -A PROFILES=(
     ["silent"]="15 25 powersave power quiet 80"                    # PL1=15W - Silent mode
     ["quiet70"]="35 50 powersave balance_power quiet 80"           # PL1=35W - Fans max 70% (~3850RPM)
     ["balanced"]="50 65 performance performance balanced 80"       # PL1=50W - Balanced (Now Max Performance)
-    ["performance"]="80 115 performance performance balanced 80"   # PL1=80W - Performance mode
+    ["performance"]="80 115 performance performance balanced-performance 80"   # PL1=80W - Performance mode (Boosted Fans)
     ["turbo"]="100 140 performance performance performance 80"     # PL1=100W - Maximum performance (Turbo Fans)
     ["extreme"]="115 160 performance performance performance 115"   # PL1=115W - Maximum (careful!)
 )
@@ -34,7 +34,12 @@ FAN2_PATH="/sys/class/hwmon/hwmon9/fan2_input"
 FAN_MAX_RPM=5500  # Approximate max RPM for Acer Predator fans
 
 # Acer EC Platform Profile path (auto-detected)
-PLATFORM_PROFILE_PATH=$(ls /sys/class/platform-profile/*/profile 2>/dev/null | head -n 1)
+# Prefer acer-thermal-lite if available
+PLATFORM_PROFILE_PATH=$(grep -l "acer-thermal-lite" /sys/class/platform-profile/*/name 2>/dev/null | sed 's/name/profile/')
+if [[ -z "$PLATFORM_PROFILE_PATH" ]]; then
+    PLATFORM_PROFILE_PATH=$(ls /sys/class/platform-profile/*/profile 2>/dev/null | head -n 1)
+fi
+FAN_BOOST_PATH="/sys/devices/platform/acer-thermal-lite/fan_boost"
 
 # EPP options: default, performance, balance_performance, balance_power, power
 
@@ -232,6 +237,28 @@ set_gpu_limit() {
     fi
 }
 
+# Set Fan Boost (Max Fans)
+set_fan_boost() {
+    local state=$1 # 1 for on, 0 for auto
+    
+    if [[ ! -f "$FAN_BOOST_PATH" ]]; then
+        return 0
+    fi
+    
+    echo -e "${CYAN}Setting Fan Boost to ${state}...${NC}"
+    echo "$state" > "$FAN_BOOST_PATH" 2>/dev/null
+    
+    local current=$(cat "$FAN_BOOST_PATH" 2>/dev/null)
+    if [[ "$current" == "$state" ]]; then
+        echo -e "${GREEN}✓ Fan Boost set to ${state}${NC}"
+        log "Fan Boost set to $state"
+        return 0
+    else
+        echo -e "${YELLOW}⚠ Could not set Fan Boost to ${state}${NC}"
+        return 1
+    fi
+}
+
 # Load acer_thermal_lite module if needed
 load_facer_module() {
     if lsmod | grep -q "acer_thermal_lite"; then
@@ -343,6 +370,13 @@ apply_profile() {
     # Finally set RAPL power limits
     set_power_limits $pl1 $pl2
     
+    # Set Fan Boost (Max Fans) for Turbo and Extreme modes
+    if [[ "$profile" == "turbo" || "$profile" == "extreme" ]]; then
+        set_fan_boost 1
+    else
+        set_fan_boost 0
+    fi
+
     # Set GPU TDP Limit
     local gpu_limit=${values[5]:-80}
     set_gpu_limit "$gpu_limit"

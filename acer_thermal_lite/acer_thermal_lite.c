@@ -14,9 +14,10 @@
 #define ACER_MISC_SETTING_VALUE_MASK GENMASK_ULL(15, 8)
 #define ACER_MISC_SETTING_STATUS_MASK GENMASK_ULL(31, 16)
 #define ACER_PLATFORM_PROFILE_INDEX 0x0B
+#define ACER_FAN_BOOST_INDEX 0x02
 
 MODULE_AUTHOR("FelipeB");
-MODULE_DESCRIPTION("Simplified Acer Predator Thermal Profile Driver");
+MODULE_DESCRIPTION("Simplified Acer Predator Thermal Profile Driver with Fan Boost");
 MODULE_LICENSE("GPL");
 
 enum {
@@ -42,19 +43,21 @@ static int wmi_gaming_execute(u32 method_id, u64 input_val, u64 *output_val)
         return -EIO;
 
     obj = result.pointer;
-    if (obj && output_val) {
-        if (obj->type == ACPI_TYPE_INTEGER)
+    if (obj) {
+        if (obj->type == ACPI_TYPE_INTEGER && output_val)
             *output_val = obj->integer.value;
-        else if (obj->type == ACPI_TYPE_BUFFER && obj->buffer.length >= 8)
+        else if (obj->type == ACPI_TYPE_BUFFER && obj->buffer.length >= 8 && output_val)
             *output_val = *(u64 *)obj->buffer.pointer;
-        else
-            ret = -ENOMSG;
+        // Other types are ignored, but not treated as error if status was success
+    } else if (output_val) {
+        ret = -ENOMSG;
     }
 
     kfree(result.pointer);
     return ret;
 }
 
+/* Platform Profile Support */
 static int acer_lite_profile_get(struct device *dev, enum platform_profile_option *profile)
 {
     u64 input = ACER_PLATFORM_PROFILE_INDEX;
@@ -118,6 +121,47 @@ static const struct platform_profile_ops acer_lite_profile_ops = {
     .profile_set = acer_lite_profile_set,
 };
 
+/* Fan Boost Support (Max Fans) */
+static ssize_t fan_boost_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+    u64 input = ACER_FAN_BOOST_INDEX;
+    u64 result;
+    int ret;
+
+    ret = wmi_gaming_execute(METHOD_GET, input, &result);
+    if (ret) return ret;
+
+    return sysfs_emit(buf, "%d\n", (u8)FIELD_GET(ACER_MISC_SETTING_VALUE_MASK, result));
+}
+
+static ssize_t fan_boost_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+    u64 input = ACER_FAN_BOOST_INDEX;
+    u64 result;
+    unsigned int val;
+    int ret;
+
+    if (kstrtouint(buf, 10, &val) || val > 1)
+        return -EINVAL;
+
+    input |= FIELD_PREP(ACER_MISC_SETTING_VALUE_MASK, val);
+    ret = wmi_gaming_execute(METHOD_SET, input, &result);
+    if (ret) return ret;
+
+    return count;
+}
+
+static DEVICE_ATTR_RW(fan_boost);
+
+static struct attribute *acer_lite_attrs[] = {
+    &dev_attr_fan_boost.attr,
+    NULL,
+};
+
+static const struct attribute_group acer_lite_group = {
+    .attrs = acer_lite_attrs,
+};
+
 static int __init acer_thermal_lite_init(void)
 {
     int err;
@@ -132,10 +176,18 @@ static int __init acer_thermal_lite_init(void)
     if (IS_ERR(pdev))
         return PTR_ERR(pdev);
 
+    /* Register sysfs for fans */
+    err = sysfs_create_group(&pdev->dev.kobj, &acer_lite_group);
+    if (err) {
+        platform_device_unregister(pdev);
+        return err;
+    }
+
     pp_dev = devm_platform_profile_register(&pdev->dev, "acer-thermal-lite", NULL, &acer_lite_profile_ops);
     if (IS_ERR(pp_dev)) {
         err = PTR_ERR(pp_dev);
         pr_err("acer_thermal_lite: Failed to register platform profile: %d\n", err);
+        sysfs_remove_group(&pdev->dev.kobj, &acer_lite_group);
         platform_device_unregister(pdev);
         return err;
     }
@@ -146,8 +198,10 @@ static int __init acer_thermal_lite_init(void)
 
 static void __exit acer_thermal_lite_exit(void)
 {
-    if (pdev)
+    if (pdev) {
+        sysfs_remove_group(&pdev->dev.kobj, &acer_lite_group);
         platform_device_unregister(pdev);
+    }
     pr_info("acer_thermal_lite: Unloaded\n");
 }
 

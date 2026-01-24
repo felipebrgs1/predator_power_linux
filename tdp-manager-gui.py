@@ -236,6 +236,18 @@ class TDPManagerWindow(Gtk.Window):
         extra_info_box.pack_end(self.auto_turbo_switch, False, False, 0)
         extra_info_box.pack_end(auto_turbo_label, False, False, 5)
 
+        # Fan Boost Switch
+        self.fan_boost_switch = Gtk.Switch()
+        self.fan_boost_switch.connect("notify::active", self.on_fan_boost_toggled)
+        self.fan_boost_switch.set_tooltip_text(
+            "Force fans to maximum speed (Manual Turbo)"
+        )
+        fan_boost_label = Gtk.Label(label="Max Fan Force:")
+        fan_boost_label.get_style_context().add_class("subtitle-label")
+
+        extra_info_box.pack_start(fan_boost_label, False, False, 5)
+        extra_info_box.pack_start(self.fan_boost_switch, False, False, 0)
+
         main_box.pack_start(extra_info_box, False, False, 0)
 
         # Profile Buttons
@@ -407,6 +419,34 @@ WantedBy=multi-user.target
         thread.daemon = True
         thread.start()
 
+    def on_fan_boost_toggled(self, switch, gparam):
+        if not hasattr(self, "_updating_from_hw") or not self._updating_from_hw:
+            active = switch.get_active()
+            state = "1" if active else "0"
+            self.status_label.set_text(
+                f"{'Enabling' if active else 'Disabling'} Fan Boost..."
+            )
+
+            def run_action():
+                # For now let's use a trick
+                subprocess.run(
+                    [
+                        "pkexec",
+                        "bash",
+                        "-c",
+                        f"echo {state} > /sys/devices/platform/acer-thermal-lite/fan_boost",
+                    ],
+                    capture_output=True,
+                )
+                GLib.idle_add(
+                    self.status_label.set_text,
+                    f"✓ Fan Boost {'Enabled' if active else 'Disabled'}",
+                )
+
+            thread = threading.Thread(target=run_action)
+            thread.daemon = True
+            thread.start()
+
     def read_gpu_temperature(self):
         try:
             result = subprocess.run(
@@ -446,6 +486,16 @@ WantedBy=multi-user.target
             pass
         return 0
 
+    def read_fan_boost(self):
+        try:
+            path = "/sys/devices/platform/acer-thermal-lite/fan_boost"
+            if os.path.exists(path):
+                with open(path, "r") as f:
+                    return f.read().strip() == "1"
+        except Exception:
+            pass
+        return False
+
     def read_temperature(self):
         try:
             # Try different thermal zone paths
@@ -472,6 +522,11 @@ WantedBy=multi-user.target
         pl1 = self.read_rapl_value(0)
         pl2 = self.read_rapl_value(1)
         temp = self.read_temperature()
+        fan_boost = self.read_fan_boost()
+
+        self._updating_from_hw = True
+        self.fan_boost_switch.set_active(fan_boost)
+        self._updating_from_hw = False
 
         # Read EC status
         ec_status = "unavailable"
