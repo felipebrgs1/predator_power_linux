@@ -22,7 +22,7 @@ NC='\033[0m' # No Color
 declare -A PROFILES=(
     ["silent"]="15 25 powersave power quiet"                    # PL1=15W - Silent mode
     ["quiet70"]="35 50 powersave balance_power quiet"           # PL1=35W - Fans max 70% (~3850RPM)
-    ["balanced"]="50 65 powersave balance_performance balanced" # PL1=50W - Balanced
+    ["balanced"]="50 65 performance performance balanced"       # PL1=50W - Balanced (Now Max Performance)
     ["performance"]="80 115 performance performance balanced"   # PL1=80W - Performance mode
     ["turbo"]="100 140 performance performance balanced"        # PL1=100W - Maximum performance
     ["extreme"]="115 160 performance performance balanced"      # PL1=115W - Maximum (careful!)
@@ -33,8 +33,8 @@ FAN1_PATH="/sys/class/hwmon/hwmon9/fan1_input"
 FAN2_PATH="/sys/class/hwmon/hwmon9/fan2_input"
 FAN_MAX_RPM=5500  # Approximate max RPM for Acer Predator fans
 
-# Acer EC Platform Profile path
-PLATFORM_PROFILE_PATH="/sys/class/platform-profile/platform-profile-0/profile"
+# Acer EC Platform Profile path (auto-detected)
+PLATFORM_PROFILE_PATH=$(ls /sys/class/platform-profile/*/profile 2>/dev/null | head -n 1)
 
 # EPP options: default, performance, balance_performance, balance_power, power
 
@@ -213,22 +213,58 @@ set_epp() {
     fi
 }
 
+# Load acer_thermal_lite module if needed
+load_facer_module() {
+    if lsmod | grep -q "acer_thermal_lite"; then
+        return 0
+    fi
+    
+    echo -e "${CYAN}Attempting to load acer_thermal_lite module...${NC}"
+    # Try the lite version first
+    local mod_path="/home/felipeb/predator_power_linux/acer_thermal_lite/acer_thermal_lite.ko"
+    if [[ -f "$mod_path" ]]; then
+        if insmod "$mod_path" 2>/dev/null; then
+            echo -e "${GREEN}✓ acer_thermal_lite loaded successfully!${NC}"
+            sleep 0.5
+            PLATFORM_PROFILE_PATH=$(ls /sys/class/platform-profile/*/profile 2>/dev/null | head -n 1)
+            return 0
+        fi
+    fi
+
+    # Fallback to standard facer if installed
+    if modprobe facer predator_v4=1 2>/dev/null; then
+        echo -e "${GREEN}✓ facer module loaded successfully!${NC}"
+        sleep 1
+        PLATFORM_PROFILE_PATH=$(ls /sys/class/platform-profile/*/profile 2>/dev/null | head -n 1)
+        return 0
+    else
+        echo -e "${RED}✗ Failed to load Acer thermal modules.${NC}"
+        echo -e "${YELLOW}Tip: Ensure acer_thermal_lite is compiled. Run: cd acer_thermal_lite && make${NC}"
+        return 1
+    fi
+}
+
 # Get current governor and EPP
 get_cpu_settings() {
     local governor=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)
     local epp=$(cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference 2>/dev/null)
     echo "$governor $epp"
 }
-
 # Set Acer EC Platform Profile (controls real TDP at hardware level)
 set_platform_profile() {
     local profile=$1
     
-    # Check if platform profile is available
-    if [[ ! -f "$PLATFORM_PROFILE_PATH" ]]; then
-        echo -e "${YELLOW}⚠ Platform profile not available (facer module not loaded?)${NC}"
+    # Check if platform profile is available, try to load if not
+    if [[ -z "$PLATFORM_PROFILE_PATH" || ! -f "$PLATFORM_PROFILE_PATH" ]]; then
+        load_facer_module
+        PLATFORM_PROFILE_PATH=$(ls /sys/class/platform-profile/*/profile 2>/dev/null | head -n 1)
+    fi
+    
+    if [[ -z "$PLATFORM_PROFILE_PATH" || ! -f "$PLATFORM_PROFILE_PATH" ]]; then
+        echo -e "${YELLOW}⚠ Platform profile still not available. Acer EC control disabled.${NC}"
         return 1
     fi
+
     
     echo -e "${CYAN}Setting Acer EC profile to ${profile}...${NC}"
     echo "$profile" > "$PLATFORM_PROFILE_PATH" 2>/dev/null
@@ -337,6 +373,7 @@ show_status() {
         fi
     done
     echo -e "${CYAN}║${NC} Profile: ${GREEN}${detected_profile}${NC}"
+
     
     # Temperature (if available)
     local temp_paths=$(find /sys/class/thermal -name "temp" -path "*thermal_zone*" 2>/dev/null | head -1)
@@ -361,6 +398,15 @@ show_status() {
     fi
     
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
+    
+    # Missing facer warning
+    if [[ "$platform" == "unavailable" ]]; then
+        echo -e "${CYAN}║${NC} ${YELLOW}⚠ WARNING: Acer EC module (facer) not found!${NC}"
+        echo -e "${CYAN}║${NC}   Power will likely drop to 35W after some time.${NC}"
+        echo -e "${CYAN}║${NC}   Try: sudo modprobe facer predator_v4=1${NC}"
+        echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
+    fi
+
     echo -e "${CYAN}║${NC} Available Profiles:${NC}"
     for profile in silent balanced performance turbo extreme; do
         local values=(${PROFILES[$profile]})
@@ -370,6 +416,47 @@ show_status() {
     done
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
 }
+
+# Daemon mode to keep settings applied
+run_daemon() {
+    local profile=$1
+    local interval=${2:-10}
+    
+    if [[ -z "$profile" ]]; then
+        echo -e "${RED}Error: Profile name required for daemon mode${NC}"
+        echo "Usage: sudo $0 daemon <profile> [interval]"
+        return 1
+    fi
+    
+    if [[ -z "${PROFILES[$profile]}" ]]; then
+        echo -e "${RED}Unknown profile: ${profile}${NC}"
+        return 1
+    fi
+    
+    echo -e "${BLUE}Starting TDP Manager Daemon...${NC}"
+    echo -e "Profile: ${GREEN}${profile}${NC}"
+    echo -e "Interval: ${interval}s"
+    
+    # Apply once at start
+    apply_profile "$profile"
+    
+    while true; do
+        sleep $interval
+        
+        # Check current values
+        local current=$(get_current_power)
+        local pl1=$(echo $current | cut -d' ' -f1)
+        
+        local target_values=(${PROFILES[$profile]})
+        local target_pl1=${target_values[0]}
+        
+        if [[ "$pl1" != "$target_pl1" ]]; then
+            echo "[$(date '+%H:%M:%S')] ⚠ Power limit reset detected (${pl1}W -> ${target_pl1}W). Re-applying..."
+            apply_profile "$profile" > /dev/null
+        fi
+    done
+}
+
 
 # Real-time power monitor
 monitor_power() {
@@ -414,8 +501,14 @@ Usage: tdp-manager.sh [COMMAND] [OPTIONS]
 Commands:
   status              Show current power configuration (no root needed)
   monitor [interval]  Live power monitoring (no root needed)
+  daemon <profile>    Run in background to keep limits applied
+  facer install       Install/Configure module persistence
+  facer build         Download and compile the facer module source
   set <PL1> <PL2>     Set custom power limits (in watts)
+
+
   profile <name>      Apply a power profile (TDP + governor + EPP)
+
   governor <mode>     Set CPU governor (performance|powersave)
   epp <mode>          Set Energy Performance Preference
   list                List available profiles
@@ -498,7 +591,85 @@ remove_service() {
     echo -e "${GREEN}✓ Service removed${NC}"
 }
 
+# Install/Configure Acer thermal module persistence
+setup_facer() {
+    echo -e "${BLUE}Configuring acer_thermal_lite module persistence...${NC}"
+    
+    # 1. Add to modules-load
+    echo "acer_thermal_lite" | tee /etc/modules-load.d/acer_thermal_lite.conf > /dev/null
+    
+    # Remove old facer configs
+    rm -f /etc/modprobe.d/facer.conf /etc/modules-load.d/facer.conf
+    
+    # 2. Try to load now
+    modprobe acer_thermal_lite 2>/dev/null
+    
+    if lsmod | grep -q "acer_thermal_lite"; then
+        echo -e "${GREEN}✓ acer_thermal_lite configured correctly and loaded!${NC}"
+    else
+        echo -e "${YELLOW}⚠ Configured but could not load. Missing the module file?${NC}"
+        echo -e "${CYAN}Try: sudo $0 facer build${NC}"
+    fi
+}
+
+# Compile and install the acer_thermal_lite module
+build_facer() {
+    echo -e "${BLUE}Starting Acer Thermal Lite build process...${NC}"
+    
+    local compiler="gcc"
+    local make_opts=""
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local src_dir="${script_dir}/acer_thermal_lite"
+    
+    # Detect if kernel was built with clang (common on CachyOS)
+    if grep -q "clang" /proc/version; then
+        echo -e "${YELLOW}Detected Clang-built kernel. Will use LLVM toolchain for compilation.${NC}"
+        compiler="clang"
+        make_opts="LLVM=1"
+    fi
+
+    # Detect package manager for dependencies
+    if command -v pacman &> /dev/null; then
+        echo -e "${CYAN}Installing dependencies via pacman...${NC}"
+        local deps="linux-headers make gcc"
+        [[ "$compiler" == "clang" ]] && deps="$deps clang lld"
+        pacman -Sy --needed --noconfirm $deps
+    elif command -v apt-get &> /dev/null; then
+        echo -e "${CYAN}Installing dependencies via apt...${NC}"
+        local deps="linux-headers-$(uname -r) make gcc"
+        [[ "$compiler" == "clang" ]] && deps="$deps clang lld"
+        apt-get update && apt-get install -y $deps
+    fi
+
+    if [[ ! -d "$src_dir" ]]; then
+        echo -e "${RED}✗ Source directory not found at $src_dir${NC}"
+        return 1
+    fi
+    
+    cd "$src_dir" || return 1
+    
+    echo -e "${CYAN}Compiling module with ${compiler}...${NC}"
+    make clean && make $make_opts
+    
+    if [[ -f "acer_thermal_lite.ko" ]]; then
+        echo -e "${CYAN}Installing module to kernel...${NC}"
+        local mod_path="/lib/modules/$(uname -r)/extra"
+        mkdir -p "$mod_path"
+        cp acer_thermal_lite.ko "$mod_path/"
+        depmod -a
+        
+        echo -e "${GREEN}✓ acer_thermal_lite compiled and installed!${NC}"
+        setup_facer
+    else
+        echo -e "${RED}✗ Compilation failed. Please check build errors above.${NC}"
+        return 1
+    fi
+}
+
+
+
 # List profiles
+
 list_profiles() {
     echo -e "${CYAN}Available Power Profiles${NC}"
     echo "========================="
@@ -519,7 +690,28 @@ main() {
         monitor)
             monitor_power "${2:-1}"
             ;;
+        daemon)
+            check_root "$1"
+            run_daemon "$2" "${3:-10}"
+            ;;
+        facer)
+            check_root "$1"
+            case "$2" in
+                install|setup)
+                    setup_facer
+                    ;;
+                build|compile)
+                    build_facer
+                    ;;
+                *)
+                    echo "Usage: $0 facer [install|build]"
+                    ;;
+            esac
+            ;;
+
         set)
+
+
             check_root "$1"
             set_power_limits "$2" "$3"
             ;;

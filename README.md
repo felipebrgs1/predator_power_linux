@@ -9,7 +9,7 @@ Um gerenciador de TDP (Thermal Design Power) para processadores Intel 12ª gera�
 No Linux, laptops Acer Predator ficam limitados a um TDP baixo (~35W) porque o **Embedded Controller (EC)** usa o modo "quiet" por padrão, mesmo com os limites RAPL configurados para valores maiores.
 
 Este projeto:
-1. **Controla o EC da Acer** via módulo `facer` (equivalente ao PredatorSense)
+1. **Controla o EC da Acer** via módulo `acer_thermal_lite` (versão estável e simplificada para controle térmico)
 2. **Ajusta os limites RAPL** (PL1/PL2)
 3. **Configura governor e EPP** do intel_pstate
 
@@ -19,28 +19,20 @@ Este projeto:
 |---------|-----------|
 | `tdp-manager.sh` | Script CLI principal |
 | `tdp-manager-gui.py` | Interface gráfica GTK3 |
+| `acer_thermal_lite/` | Fonte do módulo kernel estável |
 | `benchmark.sh` | Benchmark de stress com monitoramento |
 | `tdp-manager.desktop` | Atalho para menu |
 
 ## 🚀 Instalação
 
-### 1. Instalar o módulo Acer Predator (obrigatório para desbloquear o TDP real)
+### 1. Instalar o módulo Acer Thermal Lite
+Este módulo é essencial para impedir o laptop de derrubar o TDP para 35W.
 
 ```bash
-# Instalar dependências
-sudo pacman -S linux-headers rsync   # Arch
-# OU
-sudo apt install linux-headers-$(uname -r) rsync  # Debian/Ubuntu
-
-# Clonar e instalar o módulo facer
-git clone https://github.com/JafarAkhondali/acer-predator-turbo-and-rgb-keyboard-linux-module
-cd acer-predator-turbo-and-rgb-keyboard-linux-module
-chmod +x ./*.sh
-sudo ./install_service.sh
-
-# IMPORTANTE: Editar o service.sh para adicionar predator_v4=1
-sudo sed -i 's|insmod .*/facer.ko$|& predator_v4=1|' /opt/turbo-fan/service.sh
+# Rodar o assistente de build do próprio tdp-manager
+sudo ./tdp-manager.sh facer build
 ```
+O comando acima irá compilar o driver presente na pasta `acer_thermal_lite/`, instalá-lo no kernel e configurar o carregamento automático no boot.
 
 ### 2. Instalar o TDP Manager
 
@@ -134,9 +126,9 @@ python3 tdp-manager-gui.py
 ### Níveis de controle:
 
 1. **Acer EC (Embedded Controller)** - O limitador REAL
-   - Controlado via módulo `facer`
-   - Modos: `quiet` (35W), `balanced` (60-80W+)
-   - Equivalente ao PredatorSense no Windows
+   - Controlado via módulo `acer_thermal_lite`
+   - Modos: `quiet` (35W), `balanced` (60-80W+), `performance`, `turbo`, `eco`
+   - Equivalente aos modos térmicos do PredatorSense no Windows
 
 2. **Intel RAPL** - Limites de software
    - `/sys/class/powercap/intel-rapl/`
@@ -167,34 +159,16 @@ python3 tdp-manager-gui.py
 ## 🐛 Troubleshooting
 
 ### "Acer EC: unavailable"
-Isso ocorre quando o módulo `facer` não expõe a interface de controle do perfil. Para corrigir:
+Isso ocorre quando o módulo térmico não está carregado. Para corrigir:
 
 1. **Recompilar o módulo**:
    ```bash
-   cd acer-predator-turbo-and-rgb-keyboard-linux-module
-   make
+   sudo ./tdp-manager.sh facer build
    ```
 
-2. **Instalar com o parâmetro correto**:
+2. **Verificar se está carregado**:
    ```bash
-   # Copiar para o diretório de módulos do kernel atual
-   sudo mkdir -p /lib/modules/$(uname -r)/extra
-   sudo cp src/facer.ko /lib/modules/$(uname -r)/extra/
-   sudo depmod -a
-   ```
-
-3. **Configurar carregamento persistente**:
-   ```bash
-   # Definir parâmetro predator_v4=1 (Essencial para i7-12700H)
-   echo "options facer predator_v4=1" | sudo tee /etc/modprobe.d/facer.conf
-   
-   # Carregar no boot
-   echo "facer" | sudo tee /etc/modules-load.d/facer.conf
-   ```
-
-4. **Reiniciar ou carregar manualmente**:
-   ```bash
-   sudo modprobe facer
+   lsmod | grep acer_thermal_lite
    ```
 
 ### Frequência ainda baixa após mudar perfil
