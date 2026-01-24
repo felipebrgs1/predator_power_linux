@@ -20,12 +20,12 @@ NC='\033[0m' # No Color
 # Format: "PL1 PL2 governor EPP platform_profile"
 # platform_profile: low-power, quiet, balanced (Acer EC modes)
 declare -A PROFILES=(
-    ["silent"]="15 25 powersave power quiet"                    # PL1=15W - Silent mode
-    ["quiet70"]="35 50 powersave balance_power quiet"           # PL1=35W - Fans max 70% (~3850RPM)
-    ["balanced"]="50 65 performance performance balanced"       # PL1=50W - Balanced (Now Max Performance)
-    ["performance"]="80 115 performance performance balanced"   # PL1=80W - Performance mode
-    ["turbo"]="100 140 performance performance performance"     # PL1=100W - Maximum performance (Turbo Fans)
-    ["extreme"]="115 160 performance performance performance"   # PL1=115W - Maximum (careful!)
+    ["silent"]="15 25 powersave power quiet 80"                    # PL1=15W - Silent mode
+    ["quiet70"]="35 50 powersave balance_power quiet 80"           # PL1=35W - Fans max 70% (~3850RPM)
+    ["balanced"]="50 65 performance performance balanced 80"       # PL1=50W - Balanced (Now Max Performance)
+    ["performance"]="80 115 performance performance balanced 80"   # PL1=80W - Performance mode
+    ["turbo"]="100 140 performance performance performance 80"     # PL1=100W - Maximum performance (Turbo Fans)
+    ["extreme"]="115 160 performance performance performance 115"   # PL1=115W - Maximum (careful!)
 )
 
 # Fan monitoring paths (Acer WMI hwmon)
@@ -213,6 +213,25 @@ set_epp() {
     fi
 }
 
+# Set NVIDIA GPU Power Limit
+set_gpu_limit() {
+    local limit=$1
+    
+    if ! command -v nvidia-smi &> /dev/null; then
+        return 0
+    fi
+    
+    echo -e "${CYAN}Setting GPU power limit to ${limit}W...${NC}"
+    if nvidia-smi -pl "$limit" &> /dev/null; then
+        echo -e "${GREEN}✓ GPU power limit set to ${limit}W${NC}"
+        log "GPU limit set to ${limit}W"
+        return 0
+    else
+        echo -e "${YELLOW}⚠ Could not set GPU power limit to ${limit}W${NC}"
+        return 1
+    fi
+}
+
 # Load acer_thermal_lite module if needed
 load_facer_module() {
     if lsmod | grep -q "acer_thermal_lite"; then
@@ -324,6 +343,10 @@ apply_profile() {
     # Finally set RAPL power limits
     set_power_limits $pl1 $pl2
     
+    # Set GPU TDP Limit
+    local gpu_limit=${values[5]:-80}
+    set_gpu_limit "$gpu_limit"
+    
     echo ""
     echo -e "${GREEN}✓ Profile ${profile} applied!${NC}"
 }
@@ -374,6 +397,12 @@ show_status() {
         fi
     done
     echo -e "${CYAN}║${NC} Profile: ${GREEN}${detected_profile}${NC}"
+
+    # GPU Power Limit
+    if command -v nvidia-smi &> /dev/null; then
+        local gpu_pl=$(nvidia-smi -q -d POWER | grep "Current Power Limit" | head -n 1 | awk '{print $5}' | cut -d. -f1)
+        echo -e "${CYAN}║${NC} GPU Limit: ${YELLOW}${gpu_pl}W${NC}"
+    fi
 
     
     # Temperature (if available)
@@ -527,11 +556,11 @@ Examples:
   tdp-manager.sh monitor 2                # Monitor power every 2 seconds
 
 Profiles (TDP + Governor + EPP):
-  silent       PL1=15W   PL2=25W   powersave + power
-  balanced     PL1=45W   PL2=65W   powersave + balance_performance  
-  performance  PL1=80W   PL2=115W  performance + performance
-  turbo        PL1=100W  PL2=140W  performance + performance
-  extreme      PL1=115W  PL2=160W  performance + performance
+  silent       PL1=15W   PL2=25W   powersave + power     GPU=80W
+  balanced     PL1=50W   PL2=65W   performance + perf    GPU=80W
+  performance  PL1=80W   PL2=115W  performance + perf    GPU=80W
+  turbo        PL1=100W  PL2=140W  performance + perf    GPU=80W
+  extreme      PL1=115W  PL2=160W  performance + perf    GPU=115W
 
 Governor Options:
   performance  - CPU runs at maximum frequency

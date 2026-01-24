@@ -19,13 +19,13 @@ RAPL_PATH = "/sys/class/powercap/intel-rapl/intel-rapl:0"
 
 # Power profiles (PL1, PL2 in watts)
 # Synced with tdp-manager.sh
-# Format: "profile_id": ("Display Name", PL1, PL2)
+# Format: "profile_id": ("Display Name", PL1, PL2, GPU_Limit)
 PROFILES = {
-    "silent": ("🔇 Silent", 15, 25),
-    "balanced": ("⚖️ Balanced", 50, 65),
-    "performance": ("⚡ Performance", 80, 115),
-    "turbo": ("🚀 Turbo", 100, 140),
-    "extreme": ("🔥 Extreme", 115, 160),
+    "silent": ("🔇 Silent", 15, 25, 80),
+    "balanced": ("⚖️ Balanced", 50, 65, 80),
+    "performance": ("⚡ Performance", 80, 115, 80),
+    "turbo": ("🚀 Turbo", 100, 140, 80),
+    "extreme": ("🔥 Extreme", 115, 160, 115),
 }
 
 
@@ -247,8 +247,8 @@ class TDPManagerWindow(Gtk.Window):
         profiles_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.profile_buttons = {}
 
-        for profile_id, (profile_display, pl1, pl2) in PROFILES.items():
-            btn = Gtk.Button(label=f"{profile_display} ({pl1}W / {pl2}W)")
+        for profile_id, (profile_display, pl1, pl2, gpu) in PROFILES.items():
+            btn = Gtk.Button(label=f"{profile_display} ({pl1}W/{pl2}W/{gpu}W)")
             btn.get_style_context().add_class("profile-button")
             btn.connect("clicked", self.on_profile_clicked, profile_id)
             profiles_box.pack_start(btn, False, False, 0)
@@ -425,6 +425,27 @@ WantedBy=multi-user.target
             pass
         return 0
 
+    def read_gpu_limit(self):
+        try:
+            result = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "-q",
+                    "-d",
+                    "POWER",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=1,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    if "Current Power Limit" in line:
+                        return int(float(line.split(":")[1].strip().split()[0]))
+        except Exception:
+            pass
+        return 0
+
     def read_temperature(self):
         try:
             # Try different thermal zone paths
@@ -473,6 +494,7 @@ WantedBy=multi-user.target
         self.pl2_value.set_text(str(pl2))
 
         gpu_temp = self.read_gpu_temperature()
+        gpu_limit = self.read_gpu_limit()
         self.temp_value.set_text(f"{temp} / {gpu_temp}")
         max_temp = max(temp, gpu_temp)
 
@@ -498,9 +520,13 @@ WantedBy=multi-user.target
         # Highlight active profile
         for profile_id, btn in self.profile_buttons.items():
             if profile_id in PROFILES:
-                _, profile_pl1, profile_pl2 = PROFILES[profile_id]
+                _, profile_pl1, profile_pl2, profile_gpu = PROFILES[profile_id]
                 ctx = btn.get_style_context()
-                if pl1 == profile_pl1 and pl2 == profile_pl2:
+                if (
+                    pl1 == profile_pl1
+                    and pl2 == profile_pl2
+                    and gpu_limit == profile_gpu
+                ):
                     ctx.add_class("active")
                     self.active_profile = profile_id
                 else:
@@ -508,10 +534,10 @@ WantedBy=multi-user.target
 
         # Persistent Mode Logic
         if self.keep_applied_switch.get_active() and self.active_profile:
-            _, target_pl1, target_pl2 = PROFILES[self.active_profile]
-            if pl1 != target_pl1 or pl2 != target_pl2:
+            _, target_pl1, target_pl2, target_gpu = PROFILES[self.active_profile]
+            if pl1 != target_pl1 or pl2 != target_pl2 or gpu_limit != target_gpu:
                 # Re-apply if it dropped
-                self.apply_power_limits(target_pl1, target_pl2)
+                self.apply_named_profile(self.active_profile)
 
         return True  # Continue timer
 
