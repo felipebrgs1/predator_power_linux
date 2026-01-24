@@ -24,8 +24,8 @@ declare -A PROFILES=(
     ["quiet70"]="35 50 powersave balance_power quiet"           # PL1=35W - Fans max 70% (~3850RPM)
     ["balanced"]="50 65 performance performance balanced"       # PL1=50W - Balanced (Now Max Performance)
     ["performance"]="80 115 performance performance balanced"   # PL1=80W - Performance mode
-    ["turbo"]="100 140 performance performance balanced"        # PL1=100W - Maximum performance
-    ["extreme"]="115 160 performance performance balanced"      # PL1=115W - Maximum (careful!)
+    ["turbo"]="100 140 performance performance performance"     # PL1=100W - Maximum performance (Turbo Fans)
+    ["extreme"]="115 160 performance performance performance"   # PL1=115W - Maximum (careful!)
 )
 
 # Fan monitoring paths (Acer WMI hwmon)

@@ -178,9 +178,9 @@ class TDPManagerWindow(Gtk.Window):
 
         # Temperature Display
         temp_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        temp_label = Gtk.Label(label="TEMP")
+        temp_label = Gtk.Label(label="CPU / GPU")
         temp_label.get_style_context().add_class("subtitle-label")
-        self.temp_value = Gtk.Label(label="--")
+        self.temp_value = Gtk.Label(label="-- / --")
         self.temp_value.get_style_context().add_class("temp-label")
         temp_unit = Gtk.Label(label="°C")
         temp_unit.get_style_context().add_class("unit-label")
@@ -222,6 +222,19 @@ class TDPManagerWindow(Gtk.Window):
 
         extra_info_box.pack_end(self.keep_applied_switch, False, False, 0)
         extra_info_box.pack_end(keep_label, False, False, 5)
+
+        # Auto Turbo (Service Control)
+        self.auto_turbo_switch = Gtk.Switch()
+        self.auto_turbo_switch.set_active(self.is_service_active("auto-turbo"))
+        self.auto_turbo_switch.set_tooltip_text(
+            "Enable Background Auto Turbo Service (CPU 80°C / GPU 70°C)"
+        )
+        self.auto_turbo_switch.connect("notify::active", self.on_auto_turbo_toggled)
+        auto_turbo_label = Gtk.Label(label="Background Auto Turbo:")
+        auto_turbo_label.get_style_context().add_class("subtitle-label")
+
+        extra_info_box.pack_end(self.auto_turbo_switch, False, False, 0)
+        extra_info_box.pack_end(auto_turbo_label, False, False, 5)
 
         main_box.pack_start(extra_info_box, False, False, 0)
 
@@ -319,6 +332,65 @@ class TDPManagerWindow(Gtk.Window):
         except Exception:
             return 0
 
+    def is_service_active(self, service_name):
+        try:
+            result = subprocess.run(
+                ["systemctl", "is-active", service_name],
+                capture_output=True,
+                text=True,
+            )
+            return result.stdout.strip() == "active"
+        except Exception:
+            return False
+
+    def on_auto_turbo_toggled(self, switch, gparam):
+        active = switch.get_active()
+        action = "start" if active else "stop"
+        self.status_label.set_text(
+            f"{'Starting' if active else 'Stopping'} background service..."
+        )
+
+        def run_action():
+            try:
+                subprocess.run(
+                    ["pkexec", "systemctl", action, "auto-turbo"], capture_output=True
+                )
+                # Also enable/disable for boot persistence
+                boot_action = "enable" if active else "disable"
+                subprocess.run(
+                    ["pkexec", "systemctl", boot_action, "auto-turbo"],
+                    capture_output=True,
+                )
+
+                GLib.idle_add(
+                    self.status_label.set_text,
+                    f"✓ Auto Turbo Service {'Enabled' if active else 'Disabled'}",
+                )
+            except Exception as e:
+                GLib.idle_add(self.status_label.set_text, f"✗ Error: {str(e)}")
+
+        thread = threading.Thread(target=run_action)
+        thread.daemon = True
+        thread.start()
+
+    def read_gpu_temperature(self):
+        try:
+            result = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=temperature.gpu",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=1,
+            )
+            if result.returncode == 0:
+                return int(result.stdout.strip())
+        except Exception:
+            pass
+        return 0
+
     def read_temperature(self):
         try:
             # Try different thermal zone paths
@@ -365,7 +437,10 @@ class TDPManagerWindow(Gtk.Window):
         self.pl1_value.set_text(str(pl1))
 
         self.pl2_value.set_text(str(pl2))
-        self.temp_value.set_text(str(temp))
+
+        gpu_temp = self.read_gpu_temperature()
+        self.temp_value.set_text(f"{temp} / {gpu_temp}")
+        max_temp = max(temp, gpu_temp)
 
         # Update temperature color
         ctx = self.temp_value.get_style_context()
@@ -373,9 +448,9 @@ class TDPManagerWindow(Gtk.Window):
         ctx.remove_class("temp-warn")
         ctx.remove_class("temp-crit")
 
-        if temp < 70:
+        if max_temp < 70:
             ctx.add_class("temp-ok")
-        elif temp < 85:
+        elif max_temp < 85:
             ctx.add_class("temp-warn")
         else:
             ctx.add_class("temp-crit")
@@ -424,6 +499,13 @@ class TDPManagerWindow(Gtk.Window):
 
     def apply_named_profile(self, profile_id):
         self.status_label.set_text(f"Applying profile: {profile_id}...")
+
+        # Save desired profile for the background daemon
+        try:
+            with open("/tmp/tdp_desired_profile", "w") as f:
+                f.write(profile_id)
+        except:
+            pass
 
         def apply():
             script_path = os.path.join(

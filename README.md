@@ -1,209 +1,65 @@
-# TDP Manager - Gerenciador de Potência Intel para Linux
+# 🚀 Predator TDP Manager - Guia de Uso
 
-Um gerenciador de TDP (Thermal Design Power) para processadores Intel 12ª geração (Alder Lake) no Linux, similar ao ThrottleStop do Windows.
+Este utilitário permite controlar o consumo de energia (TDP), perfis de performance e fans do seu Acer Predator no Linux.
 
-**Desenvolvido para Acer Predator PT316-51s com Intel i7-12700H**
+## ✨ Funcionalidades Principais
 
-## 🎯 Problema Resolvido
+*   **Perfis de Energia**: Alteração rápida entre modos Silent, Balanced, Performance e Extreme.
+*   **Controle de TDP**: Ajuste manual dos limites PL1 e PL2 do processador Intel.
+*   **Auto Turbo (Background)**: Monitoramento inteligente que liga as ventoinhas no máximo quando o PC esquenta e volta ao normal quando esfria.
 
-No Linux, laptops Acer Predator ficam limitados a um TDP baixo (~35W) porque o **Embedded Controller (EC)** usa o modo "quiet" por padrão, mesmo com os limites RAPL configurados para valores maiores.
+## 🌡️ Como funciona o Auto Turbo?
 
-Este projeto:
-1. **Controla o EC da Acer** via módulo `acer_thermal_lite` (versão estável e simplificada para controle térmico)
-2. **Ajusta os limites RAPL** (PL1/PL2)
-3. **Configura governor e EPP** do intel_pstate
+O sistema monitora a temperatura constantemente em segundo plano:
+*   **CPU >= 80°C** ou **GPU >= 70°C**: Ativa o modo **Turbo** (Fans no Máximo).
+*   **CPU < 75°C** e **GPU < 65°C**: Retorna ao perfil que você estava usando antes.
 
-## 📦 Arquivos
+## 🚀 Passo a Passo (Início Rápido)
 
-| Arquivo | Descrição |
-|---------|-----------|
-| `tdp-manager.sh` | Script CLI principal |
-| `tdp-manager-gui.py` | Interface gráfica GTK3 |
-| `acer_thermal_lite/` | Fonte do módulo kernel estável |
-| `benchmark.sh` | Benchmark de stress com monitoramento |
-| `tdp-manager.desktop` | Atalho para menu |
+Siga estas etapas para configurar tudo no seu Predator:
 
-## 🚀 Instalação
-
-### 1. Instalar o módulo Acer Thermal Lite
-Este módulo é essencial para impedir o laptop de derrubar o TDP para 35W.
-
+### 1. Preparar o Módulo de Kernel
+O módulo `acer_thermal_lite` é o que permite ao Linux conversar com o hardware da Acer:
 ```bash
-# Rodar o assistente de build do próprio tdp-manager
 sudo ./tdp-manager.sh facer build
 ```
-O comando acima irá compilar o driver presente na pasta `acer_thermal_lite/`, instalá-lo no kernel e configurar o carregamento automático no boot.
 
-### 2. Instalar o TDP Manager
-
+### 2. Configurar o Atalho (Opcional)
+Se quiser que o gerenciador apareça no seu menu de aplicativos:
 ```bash
-# Clone este repositório
-git clone https://github.com/seu-usuario/tdp-manager.git
-cd tdp-manager
-
-# Torne executável
-chmod +x tdp-manager.sh benchmark.sh
-
-# Teste
-./tdp-manager.sh status
-
-# Aplique o perfil de performance
-sudo ./tdp-manager.sh profile performance
-
-# Instale para aplicar no boot
-sudo ./tdp-manager.sh service install performance
+# Permissão de execução para os scripts
+chmod +x tdp-manager.sh tdp-manager-gui.py auto-turbo-daemon.py
 ```
 
-## 🎮 Perfis Disponíveis
-
-| Perfil | PL1 | PL2 | EC Mode | Uso |
-|--------|-----|-----|---------|-----|
-| 🔇 Silent | 15W | 25W | quiet | Bateria, silêncio |
-| ⚖️ Balanced | 60W | 80W | balanced | Uso diário |
-| ⚡ Performance | 80W | 115W | balanced | Desenvolvimento |
-| 🚀 Turbo | 100W | 140W | balanced | Gaming |
-| 🔥 Extreme | 115W | 160W | balanced | Benchmarks |
-
-## 📋 Comandos
-
+### 3. Abrir a Interface Gráfica
 ```bash
-# Ver status completo
-./tdp-manager.sh status
-
-# Aplicar perfil
-sudo ./tdp-manager.sh profile performance
-
-# Monitorar em tempo real
-./tdp-manager.sh monitor
-
-# Valores personalizados
-sudo ./tdp-manager.sh set 70 100
-
-# Controlar individualmente
-sudo ./tdp-manager.sh governor performance
-sudo ./tdp-manager.sh epp performance
-
-# Instalar/remover serviço
-sudo ./tdp-manager.sh service install performance
-sudo ./tdp-manager.sh service remove
-
-# Ajuda
-./tdp-manager.sh help
+./tdp-manager-gui.py
 ```
 
-## 📊 Benchmark
+### 4. Ativar o Auto Turbo
+Na interface, ligue a chave **"Background Auto Turbo"**. 
+*   Isso vai pedir sua senha para criar e iniciar o serviço de sistema.
+*   Uma vez ativado, o monitoramento de 80°C/70°C funcionará sempre, mesmo após reiniciar o PC.
 
-```bash
-# Executar stress test de 30 segundos
-./benchmark.sh 30
-```
+---
 
-Exemplo de saída:
-```
-╔════════════════════════════════════════════════════════════════╗
-║          Mini CPU Benchmark - Intel i7-12700H                 ║
-╠════════════════════════════════════════════════════════════════╣
-║ Duration: 30s | CPUs: 20 | Governor: performance
-╚════════════════════════════════════════════════════════════════╝
+## 🛠️ Como usar a Interface (GUI)
 
-Time   | Temp  | Freq (P-Core) | Power | Status
-  1s   |  81°C | 4.10 GHz     |  75W  | Running
-  ...
-```
+1.  **Escolher Perfil**: Clique nos botões (Silent, Balanced, etc) para aplicar uma configuração pré-definida.
+2.  **Ajuste Manual**: Use os sliders para definir um PL1/PL2 customizado e clique em "Apply".
+3.  **Background Auto Turbo**: Ligue esta chave para ativar o serviço automático de ventoinhas. **Uma vez ligado, você pode fechar a janela que ele continuará funcionando.**
+4.  **Keep Applied**: Se ativado, o sistema impede que o hardware baixe seu TDP sozinho (Anti-Throttle).
 
-## 🖥️ Interface Gráfica
+## ⚠️ Requisitos
+*   Utilize o botão de "Auto Turbo" na interface para ativar o serviço de fundo.
+*   É necessária a senha de administrador (sudo) para aplicar as alterações de hardware.
 
-```bash
-# Instalar dependências (Arch)
-sudo pacman -S python-gobject gtk3
+---
 
-# Executar
-python3 tdp-manager-gui.py
-```
+## 📖 Documentação Adicional
+Para detalhes sobre a arquitetura do sistema, scripts de backend e funcionamento dos serviços, consulte a [Documentação Técnica](doc/TECHNICAL_INFO.md).
 
-## ⚙️ Como Funciona
+---
 
-### Níveis de controle:
-
-1. **Acer EC (Embedded Controller)** - O limitador REAL
-   - Controlado via módulo `acer_thermal_lite`
-   - Modos: `quiet` (35W), `balanced` (60-80W+), `performance`, `turbo`, `eco`
-   - Equivalente aos modos térmicos do PredatorSense no Windows
-
-2. **Intel RAPL** - Limites de software
-   - `/sys/class/powercap/intel-rapl/`
-   - PL1 (sustentado) e PL2 (burst)
-
-3. **Intel P-State** - Governor e EPP
-   - `performance` vs `powersave`
-   - EPP controla agressividade do boost
-
-### Arquitetura:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    TDP Manager                              │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│  │   Acer EC    │  │  Intel RAPL  │  │ Intel Pstate │       │
-│  │   (facer)    │  │  (PL1/PL2)   │  │ (Gov/EPP)    │       │
-│  └──────────────┘  └──────────────┘  └──────────────┘       │
-│         │                 │                 │               │
-│         ▼                 ▼                 ▼               │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │              CPU Power/Performance                  │    │
-│  └─────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## 🐛 Troubleshooting
-
-### "Acer EC: unavailable"
-Isso ocorre quando o módulo térmico não está carregado. Para corrigir:
-
-1. **Recompilar o módulo**:
-   ```bash
-   sudo ./tdp-manager.sh facer build
-   ```
-
-2. **Verificar se está carregado**:
-   ```bash
-   lsmod | grep acer_thermal_lite
-   ```
-
-### Frequência ainda baixa após mudar perfil
-```bash
-# Verificar governor
-cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
-
-# Deve ser "performance", se for "powersave":
-sudo ./tdp-manager.sh governor performance
-```
-
-### Serviço não inicia no boot
-```bash
-# Verificar dependências
-systemctl status turbo-fan  # Deve estar running
-systemctl status tdp-manager
-
-# Logs
-journalctl -u tdp-manager -b
-```
-
-## 🔗 Dependências e Links
-
-- [acer-predator-turbo-and-rgb-keyboard-linux-module](https://github.com/JafarAkhondali/acer-predator-turbo-and-rgb-keyboard-linux-module) - Módulo facer
-- [Intel RAPL Documentation](https://www.kernel.org/doc/html/latest/power/powercap/powercap.html)
-- [Arch Wiki - CPU frequency scaling](https://wiki.archlinux.org/title/CPU_frequency_scaling)
-
-## 📄 Licença
-
-MIT License - Use por sua conta e risco!
-
-## 🤝 Compatibilidade
-
-Testado em:
-- **Acer Predator Triton 300 (PT316-51s)** - Intel i7-12700H
-- Arch Linux 6.17.x
-
-Deve funcionar em outros modelos Acer Predator suportados pelo módulo facer.
+## 🤝 Créditos e Agradecimentos
+Este projeto foi baseado e utiliza conceitos fundamentais do módulo [facer](https://github.com/JafarAkhondali/acer-predator-turbo-and-rgb-keyboard-linux-module), desenvolvido por Jafar Akhondali. O controle do Embedded Controller (EC) da Acer para laptops Predator no Linux só é possível graças ao excelente trabalho de engenharia reversa realizado nesse projeto original.
