@@ -774,10 +774,20 @@ main() {
             ;;
 
         set)
-
-
             check_root "$1"
             set_power_limits "$2" "$3"
+            ;;
+        gpu)
+            check_root "$1"
+            set_gpu_limit "$2"
+            ;;
+        fanboost)
+            check_root "$1"
+            set_fan_boost "$2"
+            ;;
+        platform)
+            check_root "$1"
+            set_platform_profile "$2"
             ;;
         profile)
             check_root "$1"

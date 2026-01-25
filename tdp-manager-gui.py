@@ -36,6 +36,7 @@ class TDPManagerWindow(Gtk.Window):
         self.set_resizable(False)
         self.active_profile = None
         self.lock_limits = False
+        self.is_applying = False  # Safety lock for auth/subprocess
 
         # Apply dark theme
         settings = Gtk.Settings.get_default()
@@ -250,6 +251,27 @@ class TDPManagerWindow(Gtk.Window):
 
         main_box.pack_start(extra_info_box, False, False, 0)
 
+        # GPU Selection
+        gpu_label = Gtk.Label(label="GPU TDP Limit (Optional Override)")
+        gpu_label.set_halign(Gtk.Align.START)
+        gpu_label.get_style_context().add_class("subtitle-label")
+        main_box.pack_start(gpu_label, False, False, 5)
+
+        gpu_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        gpu_box.set_halign(Gtk.Align.CENTER)
+
+        self.gpu_80_btn = Gtk.Button(label="80W (Standard)")
+        self.gpu_80_btn.get_style_context().add_class("profile-button")
+        self.gpu_80_btn.connect("clicked", self.on_gpu_clicked, 80)
+
+        self.gpu_115_btn = Gtk.Button(label="115W (Turbo)")
+        self.gpu_115_btn.get_style_context().add_class("profile-button")
+        self.gpu_115_btn.connect("clicked", self.on_gpu_clicked, 115)
+
+        gpu_box.pack_start(self.gpu_80_btn, True, True, 0)
+        gpu_box.pack_start(self.gpu_115_btn, True, True, 0)
+        main_box.pack_start(gpu_box, False, False, 0)
+
         # Profile Buttons
         profiles_label = Gtk.Label(label="Power Profiles")
         profiles_label.set_halign(Gtk.Align.START)
@@ -355,9 +377,19 @@ class TDPManagerWindow(Gtk.Window):
         except Exception:
             return False
 
+    def get_auth_command(self):
+        """Returns ['pkexec'] if not root, else empty list"""
+        if os.getuid() == 0:
+            return []
+        return ["pkexec"]
+
     def on_auto_turbo_toggled(self, switch, gparam):
+        if self.is_applying:
+            return
+
         active = switch.get_active()
         action = "start" if active else "stop"
+        self.is_applying = True
         self.status_label.set_text(
             f"{'Starting' if active else 'Stopping'} background service..."
         )
@@ -385,9 +417,10 @@ WantedBy=multi-user.target
                         f.write(service_content)
 
                     # Install the dynamic service
+                    auth = self.get_auth_command()
                     subprocess.run(
-                        [
-                            "pkexec",
+                        auth
+                        + [
                             "cp",
                             tmp_service,
                             "/etc/systemd/system/auto-turbo.service",
@@ -395,16 +428,16 @@ WantedBy=multi-user.target
                         capture_output=True,
                     )
                     subprocess.run(
-                        ["pkexec", "systemctl", "daemon-reload"], capture_output=True
+                        auth + ["systemctl", "daemon-reload"], capture_output=True
                     )
 
                 subprocess.run(
-                    ["pkexec", "systemctl", action, "auto-turbo"], capture_output=True
+                    auth + ["systemctl", action, "auto-turbo"], capture_output=True
                 )
                 # Also enable/disable for boot persistence
                 boot_action = "enable" if active else "disable"
                 subprocess.run(
-                    ["pkexec", "systemctl", boot_action, "auto-turbo"],
+                    auth + ["systemctl", boot_action, "auto-turbo"],
                     capture_output=True,
                 )
 
@@ -414,24 +447,35 @@ WantedBy=multi-user.target
                 )
             except Exception as e:
                 GLib.idle_add(self.status_label.set_text, f"✗ Error: {str(e)}")
+            finally:
+
+                def unlock():
+                    self.is_applying = False
+
+                GLib.idle_add(unlock)
 
         thread = threading.Thread(target=run_action)
         thread.daemon = True
         thread.start()
 
     def on_fan_boost_toggled(self, switch, gparam):
+        if self.is_applying:
+            return
+
         if not hasattr(self, "_updating_from_hw") or not self._updating_from_hw:
             active = switch.get_active()
             state = "1" if active else "0"
+            self.is_applying = True
             self.status_label.set_text(
                 f"{'Enabling' if active else 'Disabling'} Fan Boost..."
             )
 
             def run_action():
                 # For now let's use a trick
+                auth = self.get_auth_command()
                 subprocess.run(
-                    [
-                        "pkexec",
+                    auth
+                    + [
                         "bash",
                         "-c",
                         f"echo {state} > /sys/devices/platform/acer-thermal-lite/fan_boost",
@@ -443,9 +487,38 @@ WantedBy=multi-user.target
                     f"✓ Fan Boost {'Enabled' if active else 'Disabled'}",
                 )
 
+                def unlock():
+                    self.is_applying = False
+
+                GLib.idle_add(unlock)
+
             thread = threading.Thread(target=run_action)
             thread.daemon = True
             thread.start()
+
+    def on_gpu_clicked(self, button, limit):
+        if self.is_applying:
+            return
+
+        self.is_applying = True
+        self.status_label.set_text(f"Setting GPU limit to {limit}W...")
+
+        def run_action():
+            script_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "tdp-manager.sh"
+            )
+            auth = self.get_auth_command()
+            subprocess.run(auth + [script_path, "gpu", str(limit)], capture_output=True)
+            GLib.idle_add(self.status_label.set_text, f"✓ GPU Limit set to {limit}W")
+
+            def unlock():
+                self.is_applying = False
+
+            GLib.idle_add(unlock)
+
+        thread = threading.Thread(target=run_action)
+        thread.daemon = True
+        thread.start()
 
     def read_gpu_temperature(self):
         try:
@@ -519,6 +592,9 @@ WantedBy=multi-user.target
             return 0
 
     def update_status(self):
+        if self.is_applying:
+            return True  # Don't update or trigger actions if busy
+
         pl1 = self.read_rapl_value(0)
         pl2 = self.read_rapl_value(1)
         temp = self.read_temperature()
@@ -573,26 +649,44 @@ WantedBy=multi-user.target
             self.pl2_slider.set_value(pl2)
 
         # Highlight active profile
+        self.active_profile = None
         for profile_id, btn in self.profile_buttons.items():
             if profile_id in PROFILES:
                 _, profile_pl1, profile_pl2, profile_gpu = PROFILES[profile_id]
                 ctx = btn.get_style_context()
-                if (
-                    pl1 == profile_pl1
-                    and pl2 == profile_pl2
-                    and gpu_limit == profile_gpu
-                ):
+
+                # GPU limit fluctuates due to Dynamic Boost (e.g. 80W base can show as 95W)
+                # We use a larger tolerance (20W) to keep the profile highlighted
+                gpu_match = abs(gpu_limit - profile_gpu) <= 20
+
+                if pl1 == profile_pl1 and pl2 == profile_pl2 and gpu_match:
                     ctx.add_class("active")
                     self.active_profile = profile_id
                 else:
                     ctx.remove_class("active")
 
-        # Persistent Mode Logic
+        # Update GPU selection buttons highlighting
+        ctx_80 = self.gpu_80_btn.get_style_context()
+        ctx_115 = self.gpu_115_btn.get_style_context()
+        ctx_80.remove_class("active")
+        ctx_115.remove_class("active")
+
+        # Range-based highlighting for GPU targets
+        if gpu_limit <= 100:  # 80W base + Dynamic Boost
+            ctx_80.add_class("active")
+        elif gpu_limit >= 110:  # 115W base
+            ctx_115.add_class("active")
+
+        # Persistent Mode Logic (Anti-Throttle)
         if self.keep_applied_switch.get_active() and self.active_profile:
             _, target_pl1, target_pl2, target_gpu = PROFILES[self.active_profile]
-            if pl1 != target_pl1 or pl2 != target_pl2 or gpu_limit != target_gpu:
-                # Re-apply if it dropped
-                self.apply_named_profile(self.active_profile)
+            # Precise check for CPU, tolerant check for GPU
+            gpu_diff = abs(gpu_limit - target_gpu) > 10
+            if pl1 != target_pl1 or pl2 != target_pl2 or gpu_diff:
+                # Re-apply only if significant drop or CPU change
+                # We use apply_power_limits to avoid double platform-profile hit
+                if pl1 != target_pl1 or pl2 != target_pl2:
+                    self.apply_power_limits(target_pl1, target_pl2)
 
         return True  # Continue timer
 
@@ -613,6 +707,9 @@ WantedBy=multi-user.target
         self.apply_power_limits(pl1, pl2)
 
     def apply_named_profile(self, profile_id):
+        if self.is_applying:
+            return
+        self.is_applying = True
         self.status_label.set_text(f"Applying profile: {profile_id}...")
 
         # Save desired profile for the background daemon
@@ -628,8 +725,9 @@ WantedBy=multi-user.target
             )
 
             try:
+                auth = self.get_auth_command()
                 result = subprocess.run(
-                    ["pkexec", script_path, "profile", profile_id],
+                    auth + [script_path, "profile", profile_id],
                     capture_output=True,
                     text=True,
                     timeout=30,
@@ -648,12 +746,21 @@ WantedBy=multi-user.target
                     GLib.idle_add(self.status_label.set_text, f"✗ Failed: {error_msg}")
             except Exception as e:
                 GLib.idle_add(self.status_label.set_text, f"✗ Error: {str(e)}")
+            finally:
+
+                def unlock():
+                    self.is_applying = False
+
+                GLib.idle_add(unlock)
 
         thread = threading.Thread(target=apply)
         thread.daemon = True
         thread.start()
 
     def apply_power_limits(self, pl1, pl2):
+        if self.is_applying:
+            return
+        self.is_applying = True
         self.status_label.set_text("Applying custom limits...")
 
         def apply():
@@ -662,8 +769,9 @@ WantedBy=multi-user.target
             )
 
             try:
+                auth = self.get_auth_command()
                 result = subprocess.run(
-                    ["pkexec", script_path, "set", str(pl1), str(pl2)],
+                    auth + [script_path, "set", str(pl1), str(pl2)],
                     capture_output=True,
                     text=True,
                     timeout=30,
@@ -683,6 +791,12 @@ WantedBy=multi-user.target
                     GLib.idle_add(self.status_label.set_text, f"✗ Failed: {error_msg}")
             except Exception as e:
                 GLib.idle_add(self.status_label.set_text, f"✗ Error: {str(e)}")
+            finally:
+
+                def unlock():
+                    self.is_applying = False
+
+                GLib.idle_add(unlock)
 
         thread = threading.Thread(target=apply)
         thread.daemon = True

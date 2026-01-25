@@ -6,10 +6,10 @@ import signal
 import sys
 
 # Configuration
-CPU_THRESHOLD = 80
-GPU_THRESHOLD = 70
-CPU_HYSTERESIS = 75
-GPU_HYSTERESIS = 65
+CPU_THRESHOLD = 85
+GPU_THRESHOLD = 75
+CPU_HYSTERESIS = 80
+GPU_HYSTERESIS = 70
 CHECK_INTERVAL = 2  # Seconds
 
 # Paths
@@ -73,28 +73,83 @@ class AutoTurboDaemon:
             pass
         return 0
 
-    def apply_profile(self, profile):
-        # When running as service (root), call script directly
-        subprocess.run([SCRIPT_PATH, "profile", profile], capture_output=True)
+    def get_current_limits(self):
+        try:
+            with open(
+                "/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_power_limit_uw",
+                "r",
+            ) as f:
+                pl1 = int(f.read().strip()) // 1000000
+            with open(
+                "/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_1_power_limit_uw",
+                "r",
+            ) as f:
+                pl2 = int(f.read().strip()) // 1000000
+            return pl1, pl2
+        except:
+            return 80, 115
 
     def run(self):
-        print(f"Auto Turbo Daemon started. (C{CPU_THRESHOLD}/G{GPU_THRESHOLD})")
-        while self.running:
-            cpu = self.get_cpu_temp()
-            gpu = self.get_gpu_temp()
+        print(
+            f"Auto Turbo Daemon started. (CPU >= {CPU_THRESHOLD}°C or GPU >= {GPU_THRESHOLD}°C)",
+            flush=True,
+        )
 
+        # Ensure we start in a clean state (restore desired profile on startup)
+        # This prevents "sticky" Turbo from previous sessions
+        try:
             desired = self.get_desired_profile()
+            print(f"Startup: Ensuring current profile is '{desired}'", flush=True)
+            subprocess.run([SCRIPT_PATH, "profile", desired], capture_output=True)
+        except Exception as e:
+            print(f"Startup reset error: {e}", flush=True)
 
-            if cpu >= CPU_THRESHOLD or gpu >= GPU_THRESHOLD:
-                if not self.in_auto_turbo:
-                    print(f"TEMP HIGH: CPU:{cpu}°C GPU:{gpu}°C. Activating TURBO Fans.")
-                    self.apply_profile("turbo")
-                    self.in_auto_turbo = True
-            elif cpu < CPU_HYSTERESIS and gpu < GPU_HYSTERESIS:
-                if self.in_auto_turbo:
-                    print(f"TEMP OK: CPU:{cpu}°C GPU:{gpu}°C. Restoring {desired}.")
-                    self.apply_profile(desired)
-                    self.in_auto_turbo = False
+        print("Startup: Waiting 15s for temperatures to settle...", flush=True)
+        time.sleep(15)
+
+        while self.running:
+            try:
+                cpu = self.get_cpu_temp()
+                gpu = self.get_gpu_temp()
+
+                if cpu >= CPU_THRESHOLD or gpu >= GPU_THRESHOLD:
+                    if not self.in_auto_turbo:
+                        pl1, pl2 = self.get_current_limits()
+                        print(
+                            f"TEMP HIGH: CPU:{cpu}°C GPU:{gpu}°C. Activating MAX Fans (Performance mode)...",
+                            flush=True,
+                        )
+                        # 1. Force EC into Turbo (Performance) mode - This will ramp up fans
+                        subprocess.run(
+                            [SCRIPT_PATH, "platform", "performance"],
+                            capture_output=True,
+                        )
+                        # 2. Wait a bit for EC to stabilize
+                        time.sleep(0.5)
+                        # 3. Restore the user power limits immediately (hardware override bypass)
+                        print(
+                            f"Restoring power limits to PL1={pl1}W PL2={pl2}W",
+                            flush=True,
+                        )
+                        subprocess.run(
+                            [SCRIPT_PATH, "set", str(pl1), str(pl2)],
+                            capture_output=True,
+                        )
+
+                        self.in_auto_turbo = True
+                elif cpu < CPU_HYSTERESIS and gpu < GPU_HYSTERESIS:
+                    if self.in_auto_turbo:
+                        print(
+                            f"TEMP OK: CPU:{cpu}°C GPU:{gpu}°C. Restoring original profile settings.",
+                            flush=True,
+                        )
+                        desired = self.get_desired_profile()
+                        subprocess.run(
+                            [SCRIPT_PATH, "profile", desired], capture_output=True
+                        )
+                        self.in_auto_turbo = False
+            except Exception as e:
+                print(f"Error in daemon loop: {e}", flush=True)
 
             time.sleep(CHECK_INTERVAL)
 

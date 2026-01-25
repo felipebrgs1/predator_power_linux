@@ -16,6 +16,11 @@ __pycache__/
 *.o
 *.ko
 *.mod.c
+*.cmod
+*.cmd
+*.mod
+*.symvers
+*.order
 
 # IDE
 .vscode/
