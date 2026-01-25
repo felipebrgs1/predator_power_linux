@@ -127,6 +127,26 @@ class AutoTurboDaemon:
         except:
             return 80, 115
 
+    def get_current_gpu_limit(self):
+        try:
+            res = subprocess.run(
+                ["nvidia-smi", "-q", "-d", "POWER"],
+                capture_output=True,
+                text=True,
+                timeout=1,
+            )
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    if "Current Power Limit" in line:
+                        # Format: "Current Power Limit                  : 80.00 W"
+                        parts = line.split(":")
+                        if len(parts) > 1:
+                            val = parts[1].strip().split()[0]
+                            return int(float(val))
+        except:
+            pass
+        return None
+
     def run(self):
         print(
             f"Auto Turbo Daemon started. (CPU >= {CPU_THRESHOLD}°C or GPU >= {GPU_THRESHOLD}°C)",
@@ -153,6 +173,7 @@ class AutoTurboDaemon:
                 if cpu >= CPU_THRESHOLD or gpu >= GPU_THRESHOLD:
                     if not self.in_auto_turbo:
                         pl1, pl2 = self.get_current_limits()
+                        gpu_limit = self.get_current_gpu_limit()
                         print(
                             f"TEMP HIGH: CPU:{cpu}°C GPU:{gpu}°C. Activating MAX Fans (Performance mode)...",
                             flush=True,
@@ -173,6 +194,14 @@ class AutoTurboDaemon:
                             [SCRIPT_PATH, "set", str(pl1), str(pl2)],
                             capture_output=True,
                         )
+
+                        # 4. Restore GPU limit if we can read it
+                        if gpu_limit:
+                            print(f"Restoring GPU limit to {gpu_limit}W", flush=True)
+                            subprocess.run(
+                                [SCRIPT_PATH, "gpu", str(gpu_limit)],
+                                capture_output=True,
+                            )
 
                         self.in_auto_turbo = True
                 elif cpu < CPU_HYSTERESIS and gpu < GPU_HYSTERESIS:
