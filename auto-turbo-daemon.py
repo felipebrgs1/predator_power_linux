@@ -25,7 +25,27 @@ class AutoTurboDaemon:
 
         # Initialize desired profile if not exists
         if not os.path.exists(DESIRED_PROFILE_FILE):
-            self.set_desired_profile("balanced")
+            # Try to load from persistent storage
+            user_home = os.path.dirname(
+                BASE_DIR
+            )  # Assumes script is in a subdir of home or similar
+            persistent_file = os.path.join(
+                user_home, ".config", "tdp-manager", "last_profile"
+            )
+
+            start_profile = "balanced"
+            if os.path.exists(persistent_file):
+                try:
+                    with open(persistent_file, "r") as f:
+                        start_profile = f.read().strip()
+                    print(
+                        f"Startup: Loaded persistent profile '{start_profile}'",
+                        flush=True,
+                    )
+                except:
+                    pass
+
+            self.set_desired_profile(start_profile)
 
     def get_desired_profile(self):
         try:
@@ -38,8 +58,17 @@ class AutoTurboDaemon:
         try:
             with open(DESIRED_PROFILE_FILE, "w") as f:
                 f.write(profile)
-        except:
-            pass
+
+            # Ensure the user (non-root) can write to this file later
+            # We assume the owner of the script is the user we want
+            try:
+                stat_info = os.stat(SCRIPT_PATH)
+                os.chown(DESIRED_PROFILE_FILE, stat_info.st_uid, stat_info.st_gid)
+            except:
+                pass
+
+        except Exception as e:
+            print(f"Error setting profile file: {e}", flush=True)
 
     def get_cpu_temp(self):
         try:

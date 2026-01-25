@@ -712,12 +712,24 @@ WantedBy=multi-user.target
         self.is_applying = True
         self.status_label.set_text(f"Applying profile: {profile_id}...")
 
-        # Save desired profile for the background daemon
+        # Save desired profile for the background daemon and persistence
         try:
-            with open("/tmp/tdp_desired_profile", "w") as f:
+            # Update running daemon
+            try:
+                with open("/tmp/tdp_desired_profile", "w") as f:
+                    f.write(profile_id)
+            except Exception:
+                pass
+
+            # Save persistence for next boot
+            config_dir = os.path.expanduser("~/.config/tdp-manager")
+            if not os.path.exists(config_dir):
+                os.makedirs(config_dir, exist_ok=True)
+
+            with open(os.path.join(config_dir, "last_profile"), "w") as f:
                 f.write(profile_id)
-        except:
-            pass
+        except Exception as e:
+            print(f"Warning: Could not save profile persistence: {e}")
 
         def apply():
             script_path = os.path.join(
