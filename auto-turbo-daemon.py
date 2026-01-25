@@ -45,6 +45,15 @@ class AutoTurboDaemon:
                 except:
                     pass
 
+            # If user left it on Turbo/Extreme, downgrade to Balanced for startup silence
+            # The daemon will auto-engage Turbo if temps get high anyway.
+            if start_profile in ["turbo", "extreme"]:
+                print(
+                    f"Startup: Downgrading '{start_profile}' to 'balanced' to prevent max fans at boot.",
+                    flush=True,
+                )
+                start_profile = "balanced"
+
             self.set_desired_profile(start_profile)
 
     def get_desired_profile(self):
