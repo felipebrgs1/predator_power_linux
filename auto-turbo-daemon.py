@@ -22,6 +22,22 @@ class AutoTurboDaemon:
     def __init__(self):
         self.in_auto_turbo = False
         self.running = True
+        self.cpu_thermal_path = self._find_cpu_thermal_path()
+
+    def _find_cpu_thermal_path(self):
+        try:
+            for i in range(10):
+                path = f"/sys/class/thermal/thermal_zone{i}/temp"
+                if os.path.exists(path):
+                    type_path = f"/sys/class/thermal/thermal_zone{i}/type"
+                    if os.path.exists(type_path):
+                        with open(type_path, "r") as f:
+                            ztype = f.read().strip()
+                        if "x86_pkg" in ztype or "cpu" in ztype.lower():
+                            return path
+        except:
+            pass
+        return None
 
         # Initialize desired profile if not exists
         if not os.path.exists(DESIRED_PROFILE_FILE):
@@ -80,18 +96,17 @@ class AutoTurboDaemon:
             print(f"Error setting profile file: {e}", flush=True)
 
     def get_cpu_temp(self):
+        if not self.cpu_thermal_path:
+            # Try to find it again if lost
+            self.cpu_thermal_path = self._find_cpu_thermal_path()
+            if not self.cpu_thermal_path:
+                return None
+
         try:
-            for i in range(10):
-                path = f"/sys/class/thermal/thermal_zone{i}/temp"
-                if os.path.exists(path):
-                    with open(f"/sys/class/thermal/thermal_zone{i}/type", "r") as f:
-                        ztype = f.read().strip()
-                    if "x86_pkg" in ztype or "cpu" in ztype.lower():
-                        with open(path, "r") as f:
-                            return int(f.read().strip()) // 1000
+            with open(self.cpu_thermal_path, "r") as f:
+                return int(f.read().strip()) // 1000
         except:
-            pass
-        return 0
+            return None
 
     def get_gpu_temp(self):
         try:
@@ -109,7 +124,7 @@ class AutoTurboDaemon:
                 return int(res.stdout.strip())
         except:
             pass
-        return 0
+        return None
 
     def get_current_limits(self):
         try:
@@ -159,6 +174,11 @@ class AutoTurboDaemon:
             desired = self.get_desired_profile()
             print(f"Startup: Ensuring current profile is '{desired}'", flush=True)
             subprocess.run([SCRIPT_PATH, "profile", desired], capture_output=True)
+
+            # Explicitly disable Fan Boost (Max Fans) on startup to ensure silence
+            print("Startup: Forcing Fan Boost OFF...", flush=True)
+            subprocess.run([SCRIPT_PATH, "fanboost", "0"], capture_output=True)
+
         except Exception as e:
             print(f"Startup reset error: {e}", flush=True)
 
@@ -170,7 +190,11 @@ class AutoTurboDaemon:
                 cpu = self.get_cpu_temp()
                 gpu = self.get_gpu_temp()
 
-                if cpu >= CPU_THRESHOLD or gpu >= GPU_THRESHOLD:
+                # Treat None as 0 (safe fallback, don't trigger turbo on error)
+                cpu_val = cpu if cpu is not None else 0
+                gpu_val = gpu if gpu is not None else 0
+
+                if cpu_val >= CPU_THRESHOLD or gpu_val >= GPU_THRESHOLD:
                     if not self.in_auto_turbo:
                         pl1, pl2 = self.get_current_limits()
                         gpu_limit = self.get_current_gpu_limit()
@@ -204,10 +228,11 @@ class AutoTurboDaemon:
                             )
 
                         self.in_auto_turbo = True
-                elif cpu < CPU_HYSTERESIS and gpu < GPU_HYSTERESIS:
+                        self.in_auto_turbo = True
+                elif cpu_val < CPU_HYSTERESIS and gpu_val < GPU_HYSTERESIS:
                     if self.in_auto_turbo:
                         print(
-                            f"TEMP OK: CPU:{cpu}°C GPU:{gpu}°C. Restoring original profile settings.",
+                            f"TEMP OK: CPU:{cpu_val}°C GPU:{gpu_val}°C. Restoring original profile settings.",
                             flush=True,
                         )
                         desired = self.get_desired_profile()
