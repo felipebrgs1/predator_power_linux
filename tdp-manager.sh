@@ -270,6 +270,16 @@ load_facer_module() {
     local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local mod_path="${script_dir}/acer_thermal_lite/acer_thermal_lite.ko"
     if [[ -f "$mod_path" ]]; then
+        local mod_ver=$(modinfo -F vermagic "$mod_path" 2>/dev/null | awk '{print $1}')
+        local kernel_ver=$(uname -r)
+        
+        if [[ "$mod_ver" != "$kernel_ver" ]]; then
+            echo -e "${RED}✗ Kernel version mismatch detected.${NC}"
+            echo -e "${YELLOW}Module: ${mod_ver} | Kernel: ${kernel_ver}${NC}"
+            echo -e "${YELLOW}Please rebuild with: sudo $0 facer build${NC}"
+            return 1
+        fi
+
         if insmod "$mod_path" 2>/dev/null; then
             echo -e "${GREEN}✓ acer_thermal_lite loaded successfully!${NC}"
             sleep 0.5
@@ -465,9 +475,26 @@ show_status() {
     
     # Missing facer warning
     if [[ "$platform" == "unavailable" ]]; then
-        echo -e "${CYAN}║${NC} ${YELLOW}⚠ WARNING: Acer EC module (facer) not found!${NC}"
-        echo -e "${CYAN}║${NC}   Power will likely drop to 35W after some time.${NC}"
-        echo -e "${CYAN}║${NC}   Try: sudo modprobe facer predator_v4=1${NC}"
+        local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        local mod_path="${script_dir}/acer_thermal_lite/acer_thermal_lite.ko"
+        
+        echo -e "${CYAN}║${NC} ${YELLOW}⚠ WARNING: Acer EC module (facer/lite) not found!${NC}"
+        
+        if [[ -f "$mod_path" ]]; then
+            local mod_ver=$(modinfo -F vermagic "$mod_path" 2>/dev/null | awk '{print $1}')
+            local kernel_ver=$(uname -r)
+            if [[ "$mod_ver" != "$kernel_ver" ]]; then
+                echo -e "${CYAN}║${NC}   ${RED}Version mismatch detected:${NC}"
+                echo -e "${CYAN}║${NC}   Module: ${mod_ver} | Kernel: ${kernel_ver}${NC}"
+                echo -e "${CYAN}║${NC}   Please rebuild: ${GREEN}sudo $0 facer build${NC}"
+            else
+                echo -e "${CYAN}║${NC}   Module exists but is not loaded.${NC}"
+                echo -e "${CYAN}║${NC}   Try: ${GREEN}sudo $0 facer install${NC}"
+            fi
+        else
+            echo -e "${CYAN}║${NC}   Power will likely drop to 35W after some time.${NC}"
+            echo -e "${CYAN}║${NC}   Try: ${GREEN}sudo $0 facer build${NC}"
+        fi
         echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
     fi
 
