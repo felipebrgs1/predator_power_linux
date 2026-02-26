@@ -435,11 +435,26 @@ show_status() {
     local detected_profile="custom"
     for profile in "${!PROFILES[@]}"; do
         local values=(${PROFILES[$profile]})
-        if [[ "${values[0]}" == "$pl1" ]] && [[ "${values[1]}" == "$pl2" ]]; then
+        local target_pl1=${values[0]}
+        local target_pl2=${values[1]}
+        local target_plat=${values[4]:-balanced}
+        
+        if [[ "$pl1" == "$target_pl1" ]] && [[ "$pl2" == "$target_pl2" ]] && [[ "$platform" == "$target_plat" ]]; then
             detected_profile=$profile
             break
         fi
     done
+    
+    # If RAPL matches but EC doesn't, show a warning or partial match
+    if [[ "$detected_profile" == "custom" ]]; then
+        for profile in "${!PROFILES[@]}"; do
+            local values=(${PROFILES[$profile]})
+            if [[ "$pl1" == "${values[0]}" ]] && [[ "$pl2" == "${values[1]}" ]]; then
+                detected_profile="${profile} (EC Mismatch)"
+                break
+            fi
+        done
+    fi
     echo -e "${CYAN}║${NC} Profile: ${GREEN}${detected_profile}${NC}"
 
     # GPU Power Limit

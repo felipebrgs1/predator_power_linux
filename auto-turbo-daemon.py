@@ -24,6 +24,41 @@ class AutoTurboDaemon:
         self.running = True
         self.cpu_thermal_path = self._find_cpu_thermal_path()
 
+        # Initialize desired profile if not exists
+        if not os.path.exists(DESIRED_PROFILE_FILE):
+            # Try to load from persistent storage
+            # We need to find the real user home. Since we run as root, we look at the script path.
+            # Script is in /home/USERNAME/repo/...
+            parts = BASE_DIR.split("/")
+            user_home = "/" + os.path.join(*parts[:3]) if len(parts) > 2 else "/root"
+            
+            persistent_file = os.path.join(
+                user_home, ".config", "tdp-manager", "last_profile"
+            )
+
+            start_profile = "balanced"
+            if os.path.exists(persistent_file):
+                try:
+                    with open(persistent_file, "r") as f:
+                        start_profile = f.read().strip()
+                    print(
+                        f"Startup: Loaded persistent profile '{start_profile}' from {persistent_file}",
+                        flush=True,
+                    )
+                except Exception as e:
+                    print(f"Startup: Error loading persistent profile: {e}", flush=True)
+
+            # If user left it on Turbo/Extreme, downgrade to Balanced for startup silence
+            # The daemon will auto-engage Turbo if temps get high anyway.
+            if start_profile in ["turbo", "extreme"]:
+                print(
+                    f"Startup: Downgrading '{start_profile}' to 'balanced' to prevent max fans at boot.",
+                    flush=True,
+                )
+                start_profile = "balanced"
+
+            self.set_desired_profile(start_profile)
+
     def _find_cpu_thermal_path(self):
         try:
             for i in range(10):
@@ -38,39 +73,6 @@ class AutoTurboDaemon:
         except:
             pass
         return None
-
-        # Initialize desired profile if not exists
-        if not os.path.exists(DESIRED_PROFILE_FILE):
-            # Try to load from persistent storage
-            user_home = os.path.dirname(
-                BASE_DIR
-            )  # Assumes script is in a subdir of home or similar
-            persistent_file = os.path.join(
-                user_home, ".config", "tdp-manager", "last_profile"
-            )
-
-            start_profile = "balanced"
-            if os.path.exists(persistent_file):
-                try:
-                    with open(persistent_file, "r") as f:
-                        start_profile = f.read().strip()
-                    print(
-                        f"Startup: Loaded persistent profile '{start_profile}'",
-                        flush=True,
-                    )
-                except:
-                    pass
-
-            # If user left it on Turbo/Extreme, downgrade to Balanced for startup silence
-            # The daemon will auto-engage Turbo if temps get high anyway.
-            if start_profile in ["turbo", "extreme"]:
-                print(
-                    f"Startup: Downgrading '{start_profile}' to 'balanced' to prevent max fans at boot.",
-                    flush=True,
-                )
-                start_profile = "balanced"
-
-            self.set_desired_profile(start_profile)
 
     def get_desired_profile(self):
         try:
@@ -227,7 +229,6 @@ class AutoTurboDaemon:
                                 capture_output=True,
                             )
 
-                        self.in_auto_turbo = True
                         self.in_auto_turbo = True
                 elif cpu_val < CPU_HYSTERESIS and gpu_val < GPU_HYSTERESIS:
                     if self.in_auto_turbo:
