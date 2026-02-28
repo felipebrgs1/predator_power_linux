@@ -173,13 +173,21 @@ class AutoTurboDaemon:
         # Ensure we start in a clean state (restore desired profile on startup)
         # This prevents "sticky" Turbo from previous sessions
         try:
+            # Wait a few seconds to let kernel modules (acer_thermal_lite) initialize and export sysfs fully
+            print("Startup: Waiting 5s for hardware modules to initialize...", flush=True)
+            time.sleep(5)
+
             desired = self.get_desired_profile()
             print(f"Startup: Ensuring current profile is '{desired}'", flush=True)
-            subprocess.run([SCRIPT_PATH, "profile", desired], capture_output=True)
+            res_profile = subprocess.run([SCRIPT_PATH, "profile", desired], capture_output=True, text=True)
+            if res_profile.returncode != 0:
+                print(f"Startup: Profile error. Out: {res_profile.stdout} Err: {res_profile.stderr}", flush=True)
 
             # Explicitly disable Fan Boost (Max Fans) on startup to ensure silence
             print("Startup: Forcing Fan Boost OFF...", flush=True)
-            subprocess.run([SCRIPT_PATH, "fanboost", "0"], capture_output=True)
+            res_fan = subprocess.run([SCRIPT_PATH, "fanboost", "0"], capture_output=True, text=True)
+            if res_fan.returncode != 0:
+                print(f"Startup: Fanboost error. Out: {res_fan.stdout} Err: {res_fan.stderr}", flush=True)
 
         except Exception as e:
             print(f"Startup reset error: {e}", flush=True)

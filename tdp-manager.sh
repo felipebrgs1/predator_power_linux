@@ -242,7 +242,8 @@ set_fan_boost() {
     local state=$1 # 1 for on, 0 for auto
     
     if [[ ! -f "$FAN_BOOST_PATH" ]]; then
-        return 0
+        echo -e "${YELLOW}⚠ Could not set Fan Boost: Path not found ($FAN_BOOST_PATH)${NC}" >&2
+        return 1
     fi
     
     echo -e "${CYAN}Setting Fan Boost to ${state}...${NC}"
