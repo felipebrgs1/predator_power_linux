@@ -20,16 +20,7 @@ jobs:
         run: pip install pyinstaller
 
       - name: Generate resources
-        run: python3 -c "
-          bash_script = open('tdp-manager.sh').read()
-          daemon_script = open('auto-turbo-daemon.py').read()
-          tui_script = open('tdp-manager-tui.py').read()
-          code = '# Auto-generated\n\n'
-          code += f'BASH_SCRIPT = {repr(bash_script)}\n\n'
-          code += f'DAEMON_SCRIPT = {repr(daemon_script)}\n\n'
-          code += f'TUI_SCRIPT = {repr(tui_script)}\n'
-          open('predator_pkg/resources.py', 'w').write(code)
-          "
+        run: python3 gen_resources.py
 
       - name: Build binary
         run: >
