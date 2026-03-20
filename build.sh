@@ -9,6 +9,7 @@ echo "==> Building binary..."
 .venv/bin/pyinstaller \
     --onefile \
     --name predator-power \
+    --hidden-import curses \
     --hidden-import predator_pkg \
     --hidden-import predator_pkg.resources \
     --collect-all predator_pkg \
