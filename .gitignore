@@ -1,24 +1,21 @@
-# TDP Manager - Gitignore
+# Predator Power Manager
 
-# Logs
-*.log
-/tmp/
+# Build
+build/
+dist/
+*.spec
+.venv/
+predator_pkg/resources.py
 
 # Python
 __pycache__/
 *.pyc
-*.pyo
 
-# Config files (user-specific)
-.config/
-
-# Build artifacts
+# Kernel module build
 *.o
 *.ko
-*.mod.c
-*.cmod
+*.mod*
 *.cmd
-*.mod
 *.symvers
 *.order
 
@@ -26,6 +23,5 @@ __pycache__/
 .vscode/
 .idea/
 
-# OS files
+# OS
 .DS_Store
-Thumbs.db

@@ -2,9 +2,9 @@
 Name=TDP Manager
 Comment=Intel CPU Power Limit Manager
 GenericName=Power Manager
-Exec=sh -c "python3 \$HOME/predator_power_linux/tdp-manager-gui.py"
+Exec=sh -c "$HOME/predator_power_linux/dist/predator-power tui"
 Icon=preferences-system-power
-Terminal=false
+Terminal=true
 Type=Application
 Categories=System;Settings;HardwareSettings;
 Keywords=tdp;power;cpu;intel;throttle;performance;
