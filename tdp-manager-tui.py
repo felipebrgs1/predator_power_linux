@@ -122,27 +122,40 @@ class TUI:
         self.scr.refresh()
 
     def handle(self, key):
-        profiles = {ord("1"): "balanced", ord("2"): "performance", ord("3"): "turbo"}
+        profiles = {
+            ord("1"): "balanced",
+            ord("2"): "performance",
+            ord("3"): "turbo",
+        }
 
         if key in profiles:
             p = profiles[key]
-            threading.Thread(target=lambda: run(["profile", p]), daemon=True).start()
+
+            def task_p():
+                run(["profile", p])
+                self.msg = f"Profile: {p.upper()}"
+
+            threading.Thread(target=task_p, daemon=True).start()
             self.msg = f"Applying {p}..."
         elif key == ord("f") or key == ord("F"):
             fan = read_fan()
-            threading.Thread(
-                target=lambda: run(["fanboost", "0" if fan else "1"]), daemon=True
-            ).start()
+            state = "0" if fan else "1"
+
+            def task_f():
+                run(["fanboost", state])
+                self.msg = f"Fan Boost: {'ON' if state == '1' else 'OFF'}"
+
+            threading.Thread(target=task_f, daemon=True).start()
             self.msg = "Toggling fan..."
         elif key == ord("s") or key == ord("S"):
             svc = service_active()
             cmd = ["service", "remove"] if svc else ["service", "balanced"]
 
-            def task():
+            def task_s():
                 run(cmd)
                 self.msg = "Service Updated"
 
-            threading.Thread(target=task, daemon=True).start()
+            threading.Thread(target=task_s, daemon=True).start()
             self.msg = "Toggling service..."
         elif key == ord("r") or key == ord("R"):
             self.msg = "Refreshed"

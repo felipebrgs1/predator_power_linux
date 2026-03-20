@@ -41,7 +41,17 @@ set_platform() {
 
 set_fanboost() {
     local state=$1
-    echo "$state" > "$FAN_BOOST_PATH"
+    if [[ $state -eq 1 ]]; then
+        # Fan boost requires performance platform profile on most Predators
+        set_platform "performance"
+        echo 1 > "$FAN_BOOST_PATH"
+    else
+        echo 0 > "$FAN_BOOST_PATH"
+        # Restore the platform profile associated with the current TDP profile
+        local cur_name=$(cat "$PROFILE_FILE" 2>/dev/null || echo "balanced")
+        local vals=(${PROFILES[$cur_name]})
+        [[ -n "${vals[2]}" ]] && set_platform "${vals[2]}"
+    fi
     echo -e "${GREEN}Fan Boost: $([ $state -eq 1 ] && echo ON || echo OFF)${NC}"
 }
 
@@ -50,13 +60,24 @@ apply_profile() {
     local vals=(${PROFILES[$name]})
     [[ ${#vals[@]} -eq 0 ]] && { echo -e "${RED}Unknown: $name${NC}"; exit 1; }
 
-    set_platform "${vals[2]}"
+    # Save current profile name first
+    echo "$name" > "$PROFILE_FILE"
+
     set_power "${vals[0]}" "${vals[1]}"
 
-    # Fan boost only for turbo
-    [[ "$name" == "turbo" ]] && set_fanboost 1 || set_fanboost 0
+    # Check if fan boost is already ON
+    local fan=$(cat "$FAN_BOOST_PATH" 2>/dev/null)
+    if [[ "$fan" == "1" ]]; then
+        # Keep it ON (requires performance platform)
+        set_platform "performance"
+    else
+        # Use the profile's default platform
+        set_platform "${vals[2]}"
+    fi
 
-    echo "$name" > "$PROFILE_FILE"
+    # Auto-enable fan boost for turbo profile
+    [[ "$name" == "turbo" ]] && set_fanboost 1
+
     mkdir -p "$CONFIG_DIR"
     echo "$name" > "$CONFIG_DIR/last_profile"
     echo -e "${GREEN}Profile: $name${NC}"
