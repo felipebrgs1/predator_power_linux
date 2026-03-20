@@ -79,7 +79,7 @@ show_status() {
 
 install_service() {
     local profile=${1:-balanced}
-    local bin=$(readlink -f "$0")
+    local bin=${2:-$(readlink -f "$0")}
 
     cat > /etc/systemd/system/predator-power.service << EOF
 [Unit]
@@ -98,10 +98,12 @@ EOF
 
     systemctl daemon-reload
     systemctl enable predator-power.service
+    systemctl start predator-power.service
     echo -e "${GREEN}Service installed: profile '${profile}' on boot${NC}"
 }
 
 remove_service() {
+    systemctl stop predator-power.service 2>/dev/null
     systemctl disable predator-power.service 2>/dev/null
     rm -f /etc/systemd/system/predator-power.service
     systemctl daemon-reload
@@ -114,6 +116,6 @@ case "${1:-status}" in
     profile)   check_root; apply_profile "$2" ;;
     status)    show_status ;;
     list)      echo "Profiles: ${!PROFILES[@]}" ;;
-    service)   check_root; [[ "$2" == "remove" ]] && remove_service || install_service "$2" ;;
+    service)   check_root; [[ "$2" == "remove" ]] && remove_service || install_service "$2" "$3" ;;
     *)         echo "Usage: $0 {set|fanboost|profile|status|list|service} [args]" ;;
 esac

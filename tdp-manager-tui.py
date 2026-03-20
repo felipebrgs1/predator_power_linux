@@ -7,7 +7,8 @@ import os
 import threading
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-SCRIPT = os.path.join(SCRIPT_DIR, "tdp-manager.sh")
+# Check if provided via global from predator-power.py
+SCRIPT = globals().get("BASH_SCRIPT_PATH", os.path.join(SCRIPT_DIR, "tdp-manager.sh"))
 RAPL = "/sys/class/powercap/intel-rapl/intel-rapl:0"
 FAN_PATH = "/sys/devices/platform/acer-thermal-lite/fan_boost"
 
@@ -20,7 +21,7 @@ def read_rapl(n):
     try:
         with open(f"{RAPL}/constraint_{n}_power_limit_uw") as f:
             return int(f.read().strip()) // 1000000
-    except:
+    except (OSError, ValueError):
         return 0
 
 
@@ -28,7 +29,7 @@ def read_fan():
     try:
         with open(FAN_PATH) as f:
             return f.read().strip() == "1"
-    except:
+    except OSError:
         return False
 
 
@@ -38,7 +39,7 @@ def service_active():
             ["systemctl", "is-active", "predator-power"], capture_output=True, text=True
         )
         return r.stdout.strip() == "active"
-    except:
+    except (OSError, subprocess.SubprocessError):
         return False
 
 
@@ -136,7 +137,12 @@ class TUI:
         elif key == ord("s") or key == ord("S"):
             svc = service_active()
             cmd = ["service", "remove"] if svc else ["service", "balanced"]
-            threading.Thread(target=lambda: run(cmd), daemon=True).start()
+
+            def task():
+                run(cmd)
+                self.msg = "Service Updated"
+
+            threading.Thread(target=task, daemon=True).start()
             self.msg = "Toggling service..."
         elif key == ord("r") or key == ord("R"):
             self.msg = "Refreshed"
@@ -150,7 +156,7 @@ class TUI:
                 k = self.scr.getch()
                 if k != -1:
                     self.handle(k)
-            except KeyboardInterrupt:
+            except (KeyboardInterrupt, curses.error):
                 self.running = False
 
 

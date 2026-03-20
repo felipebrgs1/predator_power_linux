@@ -21,6 +21,11 @@ def run_bash(args):
 
     path, tmpdir = _write_temp(BASH_SCRIPT, "tdp-manager.sh")
     try:
+        # If installing service, pass the current binary path so the service is permanent
+        if args and args[0] == "service" and "remove" not in args:
+            binary_path = os.path.abspath(sys.executable)
+            args = list(args) + [binary_path]
+
         cmd = [path] + args
         if os.getuid() != 0:
             cmd = ["pkexec"] + cmd
@@ -29,20 +34,30 @@ def run_bash(args):
         try:
             os.unlink(path)
             os.rmdir(tmpdir)
-        except:
+        except OSError:
             pass
 
 
 def run_tui():
-    from predator_pkg.resources import TUI_SCRIPT
+    from predator_pkg.resources import BASH_SCRIPT, TUI_SCRIPT
 
-    exec(compile(TUI_SCRIPT, "tdp-manager-tui.py", "exec"))
+    path, tmpdir = _write_temp(BASH_SCRIPT, "tdp-manager.sh")
+    try:
+        g = globals().copy()
+        g["BASH_SCRIPT_PATH"] = path
+        exec(compile(TUI_SCRIPT, "tdp-manager-tui.py", "exec"), g)
+    finally:
+        try:
+            os.unlink(path)
+            os.rmdir(tmpdir)
+        except OSError:
+            pass
 
 
 def run_daemon():
     from predator_pkg.resources import DAEMON_SCRIPT
 
-    exec(compile(DAEMON_SCRIPT, "auto-turbo-daemon.py", "exec"))
+    exec(compile(DAEMON_SCRIPT, "auto-turbo-daemon.py", "exec"), globals())
 
 
 HELP = """
