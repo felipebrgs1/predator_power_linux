@@ -1,57 +1,72 @@
-# Predator Power Manager
+# Predator Power Manager (Acer Predator)
 
-Controle de TDP (PL1/PL2) e Fan Boost para Acer Predator no Linux.
+Controle de TDP (PL1/PL2) e Fan Boost para laptops Acer Predator no Linux. Ferramenta leve e eficiente com interface visual (TUI) e serviço de boot.
 
-## Instalação
+---
 
-Baixe o binário na aba [Releases](../../releases) ou compile:
+## 🚀 Passo a Passo: Instalação no Sistema
 
+Siga estas etapas para compilar e instalar o programa permanentemente no seu Linux:
+
+### 1. Compilar o programa
+Certifique-se de ter o Python instalado e execute o script de build para gerar o binário único:
 ```bash
-# Compilar localmente
 ./build.sh
+```
+O arquivo final será gerado em `dist/predator-power`.
+
+### 2. Mover para o diretório de binários
+Para que você possa rodar o comando `predator-power` de qualquer lugar, mova-o para `/usr/local/bin`:
+```bash
 sudo cp dist/predator-power /usr/local/bin/
+sudo chmod +x /usr/local/bin/predator-power
 ```
 
-## Uso
+### 3. Configurar inicialização automática (Boot)
+Para garantir que o perfil de energia seja aplicado sempre que você ligar o laptop:
 
+- **Via Interface Visual (Recomendado):** Digite `predator-power` no terminal e pressione a tecla **[S]**. O status deve mudar para `Auto Service: ON`.
+- **Via Comando Direto:** 
+  ```bash
+  sudo predator-power service
+  ```
+
+---
+
+## 🛠️ Como Usar
+
+### Interface Visual (TUI)
+Basta digitar o comando sem argumentos (ou com `tui`):
 ```bash
-# Interface interativa
-predator-power tui
-
-# Comandos (pede senha automaticamente)
-predator-power status
-predator-power profile balanced
-predator-power set 80 115
-predator-power fanboost 1
+predator-power
 ```
+*Dica: O programa usará `pkexec` para pedir sua senha caso não seja executado como root.*
 
-## Perfis
+### Comandos de Terminal
+| Comando | Descrição |
+|---------|-----------|
+| `predator-power status` | Mostra o TDP e Fan Boost atual |
+| `predator-power profile balanced` | Aplica perfil equilibrado (50W/65W) |
+| `predator-power profile turbo` | Aplica perfil máximo (100W/140W) |
+| `predator-power fanboost 1` | Liga o Fan Boost (Turbo das ventoinhas) |
+| `predator-power service remove` | Remove o serviço de boot |
 
-| Perfil       | PL1   | PL2    |
-|-------------|-------|--------|
-| balanced    | 50W   | 65W    |
-| performance | 80W   | 115W   |
-| turbo       | 100W  | 140W   |
+---
 
-## Service (iniciar no boot)
+## 📊 Perfis Pré-configurados
 
-```bash
-predator-power service          # instala
-predator-power service remove   # remove
-```
+| Perfil | PL1 (Sustentado) | PL2 (Pico) | Fan Boost |
+| :--- | :--- | :--- | :--- |
+| **Balanced** | 50W | 65W | OFF |
+| **Performance** | 80W | 115W | OFF |
+| **Turbo** | 100W | 140W | **ON** |
 
-## Build
+---
 
-```bash
-./build.sh
-```
+## ⌨️ Atalhos da Interface (TUI)
 
-## TUI
-
-| Tecla | Ação                    |
-|-------|------------------------|
-| 1-3   | Aplicar perfil         |
-| F     | Toggle Fan Boost       |
-| S     | Toggle Auto Service    |
-| R     | Refresh                |
-| Q     | Sair                   |
+- **[1], [2], [3]**: Alternar entre perfis.
+- **[F]**: Ligar/Desligar Fan Boost (Turbo de ventoinha).
+- **[S]**: Ativar/Desativar serviço de boot (Auto Service).
+- **[R]**: Atualizar status manualmente.
+- **[Q]**: Sair da interface.
