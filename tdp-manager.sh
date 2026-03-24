@@ -26,6 +26,13 @@ check_root() {
     exec pkexec "$0" "$@"
 }
 
+stop_conflicting_daemons() {
+    if systemctl is-active --quiet power-profiles-daemon 2>/dev/null; then
+        echo -e "${YELLOW}Stopping power-profiles-daemon (conflicts with TDP control)...${NC}"
+        systemctl stop power-profiles-daemon 2>/dev/null
+    fi
+}
+
 set_power() {
     local pl1=$1 pl2=$2
     echo $((pl1 * 1000000)) > "${RAPL_PATH}/constraint_0_power_limit_uw"
@@ -63,6 +70,7 @@ apply_profile() {
     # Save current profile name first
     echo "$name" > "$PROFILE_FILE"
 
+    stop_conflicting_daemons
     set_power "${vals[0]}" "${vals[1]}"
 
     # Check if fan boost is already ON
@@ -132,7 +140,7 @@ remove_service() {
 }
 
 case "${1:-status}" in
-    set)       check_root; set_power "$2" "$3" ;;
+    set)       check_root; stop_conflicting_daemons; set_power "$2" "$3" ;;
     fanboost)  check_root; set_fanboost "$2" ;;
     profile)   check_root; apply_profile "$2" ;;
     status)    show_status ;;
