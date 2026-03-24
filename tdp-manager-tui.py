@@ -71,6 +71,16 @@ def get_system_info():
     return "Unknown CPU"
 
 
+def safe_addstr(win, y, x, text, attr=None):
+    try:
+        if attr:
+            win.addstr(y, x, text, attr)
+        else:
+            win.addstr(y, x, text)
+    except curses.error:
+        pass
+
+
 class TUI:
     def __init__(self, scr):
         self.scr = scr
@@ -94,60 +104,64 @@ class TUI:
         curses.init_pair(5, curses.COLOR_CYAN, -1)
         curses.init_pair(6, curses.COLOR_RED, -1)
         curses.init_pair(7, 8, -1)
-        curses.init_pair(8, curses.COLOR_BLACK, curses.COLOR_CYAN)
         curses.curs_set(0)
         scr.nodelay(True)
         scr.timeout(100)
 
     def draw_bar(self, y, x, width, filled, color_pair, label=""):
         bar_width = width - len(label) - 2
+        if bar_width <= 0:
+            bar_width = 10
         fill_width = int(bar_width * filled)
-        bar = "█" * fill_width + "░" * (bar_width - fill_width)
-        self.scr.addstr(y, x, f"[{bar}] {label}", color_pair)
-
-    def get_cpu_usage_indicator(self):
-        return ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][self.anim_frame % 10]
+        bar = "|" * fill_width + "." * (bar_width - fill_width)
+        safe_addstr(self.scr, y, x, "[%s] %s" % (bar, label), color_pair)
 
     def draw_header(self, h, w):
         cy = 1
         title = " PREDATOR POWER MANAGER "
-        self.scr.attron(curses.color_pair(5) | curses.A_BOLD)
-        self.scr.addstr(cy, (w - len(title)) // 2, title)
-        self.scr.attroff(curses.color_pair(5) | curses.A_BOLD)
+        safe_addstr(
+            self.scr,
+            cy,
+            (w - len(title)) // 2,
+            title,
+            curses.color_pair(5) | curses.A_BOLD,
+        )
 
         cy += 1
-        line = "═" * (w - 4)
-        self.scr.attron(curses.color_pair(7))
-        self.scr.addstr(cy, 2, line)
-        self.scr.attroff(curses.color_pair(7))
+        line = "=" * (w - 4)
+        safe_addstr(self.scr, cy, 2, line, curses.color_pair(7))
 
         return cy + 1
 
     def draw_status(self, h, w, start_y):
         cx = max(w // 2 - 24, 2)
 
-        self.scr.addstr(start_y, cx, "┌─ System Status ─┐", curses.color_pair(7))
+        safe_addstr(
+            self.scr, start_y, cx, "+- System Status ------+", curses.color_pair(7)
+        )
         y = start_y + 1
 
-        cpu_short = self.cpu_name[:40] if len(self.cpu_name) > 40 else self.cpu_name
-        self.scr.addstr(y, cx, f"│ CPU: {cpu_short:<36} │", curses.color_pair(1))
+        cpu_short = self.cpu_name[:38] if len(self.cpu_name) > 38 else self.cpu_name
+        safe_addstr(self.scr, y, cx, "| CPU: %-36s |" % cpu_short, curses.color_pair(1))
         y += 1
-        self.scr.addstr(
+        profile_color = PROFILES.get(self.current_profile, {}).get("color", 1)
+        safe_addstr(
+            self.scr,
             y,
             cx,
-            f"│ Profile: {self.current_profile:<30} │",
-            curses.color_pair(PROFILES.get(self.current_profile, {}).get("color", 1))
-            | curses.A_BOLD,
+            "| Profile: %-28s |" % self.current_profile,
+            curses.color_pair(profile_color) | curses.A_BOLD,
         )
         y += 2
-
-        self.scr.addstr(y, cx, "└" + "─" * 49 + "┘", curses.color_pair(7))
+        safe_addstr(self.scr, y, cx, "+" + "-" * 25 + "+", curses.color_pair(7))
         return y + 1
 
     def draw_power(self, h, w, start_y):
         cx = max(w // 2 - 24, 2)
 
-        self.scr.addstr(start_y, cx, "┌─ Power Limits ─┐", curses.color_pair(7))
+        safe_addstr(
+            self.scr, start_y, cx, "+- Power Limits --------+", curses.color_pair(7)
+        )
         y = start_y + 1
 
         pl1_pct = min(self.pl1 / 140.0, 1.0)
@@ -168,107 +182,114 @@ class TUI:
             else curses.color_pair(1)
         )
 
-        self.scr.addstr(y, cx, "│ PL1 (Sustained): ", curses.color_pair(1))
-        self.draw_bar(y, cx + 18, 30, pl1_pct, pl1_color, f"{self.pl1}W")
-        self.scr.addstr(" │", curses.color_pair(1))
+        safe_addstr(self.scr, y, cx, "| PL1 (Sustained):", curses.color_pair(1))
+        self.draw_bar(y, cx + 18, 28, pl1_pct, pl1_color, "%dW" % self.pl1)
+        safe_addstr(self.scr, y, cx + 48, "|", curses.color_pair(1))
         y += 1
 
-        self.scr.addstr(y, cx, "│ PL2 (Turbo):     ", curses.color_pair(1))
-        self.draw_bar(y, cx + 18, 30, pl2_pct, pl2_color, f"{self.pl2}W")
-        self.scr.addstr(" │", curses.color_pair(1))
+        safe_addstr(self.scr, y, cx, "| PL2 (Turbo):    ", curses.color_pair(1))
+        self.draw_bar(y, cx + 18, 28, pl2_pct, pl2_color, "%dW" % self.pl2)
+        safe_addstr(self.scr, y, cx + 48, "|", curses.color_pair(1))
         y += 2
-
-        self.scr.addstr(y, cx, "└" + "─" * 49 + "┘", curses.color_pair(7))
+        safe_addstr(self.scr, y, cx, "+" + "-" * 25 + "+", curses.color_pair(7))
         return y + 1
 
     def draw_fan(self, h, w, start_y):
         cx = max(w // 2 - 24, 2)
 
-        fan_icon = "🔥" if self.fan else "❄️"
+        fan_icon = "*" if self.fan else "-"
         fan_text = "ACTIVE" if self.fan else "OFF"
         fan_color = curses.color_pair(2) if self.fan else curses.color_pair(3)
 
-        self.scr.addstr(start_y, cx, "┌─ Fan Boost ─────┐", curses.color_pair(7))
-        y = start_y + 1
-        self.scr.addstr(y, cx, f"│ {fan_icon} Fan Boost: ", curses.color_pair(1))
-        self.scr.addstr(fan_text, fan_color | curses.A_BOLD)
-        self.scr.addstr(
-            " " * (49 - len(fan_icon) - len(fan_text) - 4) + "│", curses.color_pair(1)
+        safe_addstr(
+            self.scr, start_y, cx, "+- Fan Boost -------------+", curses.color_pair(7)
         )
+        y = start_y + 1
+        safe_addstr(
+            self.scr, y, cx, "| [%s] Fan Boost: " % fan_icon, curses.color_pair(1)
+        )
+        safe_addstr(self.scr, y, cx + 17, fan_text, fan_color | curses.A_BOLD)
+        safe_addstr(self.scr, y, cx + 24, " " * 24 + "|", curses.color_pair(1))
         y += 2
-        self.scr.addstr(y, cx, "└" + "─" * 49 + "┘", curses.color_pair(7))
+        safe_addstr(self.scr, y, cx, "+" + "-" * 25 + "+", curses.color_pair(7))
         return y + 1
 
     def draw_profiles(self, h, w, start_y):
         cx = max(w // 2 - 28, 2)
 
-        self.scr.addstr(
-            start_y, cx, "┌─ Power Profiles ──────────────────┐", curses.color_pair(7)
+        safe_addstr(
+            self.scr,
+            start_y,
+            cx,
+            "+- Power Profiles -------------------+",
+            curses.color_pair(7),
         )
         y = start_y + 1
 
         for i, (key, profile) in enumerate(
-            [
-                ("1", "balanced"),
-                ("2", "performance"),
-                ("3", "turbo"),
-            ]
+            [("1", "balanced"), ("2", "performance"), ("3", "turbo")]
         ):
             p = PROFILES[profile]
             is_active = self.current_profile == profile
-            marker = "▶" if is_active else " "
+            marker = ">" if is_active else " "
             active_color = (
                 curses.color_pair(p["color"]) | curses.A_BOLD
                 if is_active
                 else curses.color_pair(7)
             )
-            self.scr.addstr(
+            line = "| [%s] %s %-11s  PL1=%2dW  PL2=%3dW" % (
+                key,
+                marker,
+                p["desc"],
+                p["pl1"],
+                p["pl2"],
+            )
+            if is_active:
+                line += " <"
+            safe_addstr(self.scr, y, cx, line, active_color)
+            safe_addstr(
+                self.scr,
                 y,
-                cx,
-                f"│ [{key}] {marker} {p['desc']:<12} PL1={p['pl1']}W  PL2={p['pl2']}W",
-                active_color,
-            )
-            extra = " ◀" if is_active else ""
-            padding = (
-                49
-                - len(
-                    f"[{key}] {marker} {p['desc']:<12} PL1={p['pl1']}W  PL2={p['pl2']}W"
-                )
-                - len(extra)
-            )
-            self.scr.addstr(
-                " " * padding + extra + " │",
-                active_color if is_active else curses.color_pair(7),
+                cx + 46,
+                " " * 17 + "|",
+                curses.color_pair(7) if not is_active else active_color,
             )
             y += 1
 
         y += 1
-        self.scr.addstr(y, cx, "└" + "─" * 49 + "┘", curses.color_pair(7))
+        safe_addstr(self.scr, y, cx, "+" + "-" * 46 + "+", curses.color_pair(7))
         return y + 1
 
     def draw_footer(self, h, w, start_y):
         cx = max(w // 2 - 28, 2)
 
-        svc_marker = "●" if self.svc else "○"
-        svc_color = curses.color_pair(2) if self.svc else curses.color_pair(3)
+        svc_marker = "*" if self.svc else "o"
 
-        self.scr.addstr(
-            start_y, cx, "┌─ Controls ─────────────────────────┐", curses.color_pair(7)
+        safe_addstr(
+            self.scr,
+            start_y,
+            cx,
+            "+- Controls ---------------------------+",
+            curses.color_pair(7),
         )
         y = start_y + 1
-        self.scr.addstr(
+        safe_addstr(
+            self.scr,
             y,
             cx,
-            f"│ [F] Toggle Fan   [S] Auto-Start {svc_marker}",
+            "| [F] Toggle Fan    [S] Auto-Start (%s)   |" % svc_marker,
             curses.color_pair(1),
         )
-        self.scr.addstr(" " * 11 + "│", curses.color_pair(1))
         y += 1
-        self.scr.addstr(
-            y, cx, "│ [Q] Quit         Auto-refresh: ON  │", curses.color_pair(7)
+        safe_addstr(
+            self.scr,
+            y,
+            cx,
+            "| [Q] Quit          Auto-refresh: ON       |",
+            curses.color_pair(7),
         )
         y += 2
-        self.scr.addstr(y, cx, "└" + "─" * 49 + "┘", curses.color_pair(7))
+        safe_addstr(self.scr, y, cx, "+" + "-" * 46 + "+", curses.color_pair(7))
         return y + 1
 
     def draw(self):
@@ -297,15 +318,17 @@ class TUI:
 
         if self.msg and time.time() - self.msg_time < 3:
             msg_color = curses.color_pair(2) | curses.A_BOLD
-            self.scr.addstr(
-                h - 2, max((w - len(self.msg)) // 2, 0), self.msg, msg_color
+            safe_addstr(
+                self.scr, h - 2, max((w - len(self.msg)) // 2, 0), self.msg, msg_color
             )
         elif self.msg and time.time() - self.msg_time >= 3:
             self.msg = ""
 
         uptime = int(time.time() - self.start_time)
         mins, secs = uptime // 60, uptime % 60
-        self.scr.addstr(h - 1, w - 12, f"{mins:02d}:{secs:02d}", curses.color_pair(7))
+        safe_addstr(
+            self.scr, h - 1, w - 7, "%02d:%02d" % (mins, secs), curses.color_pair(7)
+        )
 
         self.scr.refresh()
 
@@ -318,24 +341,24 @@ class TUI:
 
         if key in profiles_map:
             p = profiles_map[key]
-            self.msg = f"Applying {p.upper()}..."
+            self.msg = "Applying %s..." % p.upper()
             self.msg_time = time.time()
 
             def task():
                 run(["profile", p])
-                self.msg = f"Profile: {p.upper()}"
+                self.msg = "Profile: %s" % p.upper()
                 self.msg_time = time.time()
 
             threading.Thread(target=task, daemon=True).start()
 
         elif key in (ord("f"), ord("F")):
             state = "0" if self.fan else "1"
-            self.msg = f"Toggling fan {'ON' if state == '1' else 'OFF'}..."
+            self.msg = "Toggling fan %s..." % ("ON" if state == "1" else "OFF")
             self.msg_time = time.time()
 
             def task():
                 run(["fanboost", state])
-                self.msg = f"Fan Boost: {'ON' if state == '1' else 'OFF'}"
+                self.msg = "Fan Boost: %s" % ("ON" if state == "1" else "OFF")
                 self.msg_time = time.time()
 
             threading.Thread(target=task, daemon=True).start()
