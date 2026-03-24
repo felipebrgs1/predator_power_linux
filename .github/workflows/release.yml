@@ -38,7 +38,15 @@ jobs:
           --collect-all predator_pkg
           predator-power.py
 
+      - name: Upload artifact (main branch)
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: predator-power
+          path: dist/predator-power
+
       - name: Upload to Release
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
           files: dist/predator-power
