@@ -38,14 +38,30 @@ jobs:
           --collect-all predator_pkg
           predator-power.py
 
-      - name: Upload artifact (main branch)
+      - name: Create Release (main branch)
         if: github.event_name == 'push'
-        uses: actions/upload-artifact@v4
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          name: predator-power
-          path: dist/predator-power
+          tag_name: v${{ github.run_number }}
+          release_name: Predator Power v${{ github.run_number }}
+          draft: false
+          prerelease: false
 
-      - name: Upload to Release
+      - name: Upload to Release (main branch)
+        if: github.event_name == 'push'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: dist/predator-power
+          asset_name: predator-power
+          asset_content_type: application/octet-stream
+
+      - name: Upload to Release (tagged release)
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
