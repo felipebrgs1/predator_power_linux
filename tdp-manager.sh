@@ -27,10 +27,13 @@ check_root() {
 }
 
 stop_conflicting_daemons() {
-    if systemctl is-active --quiet power-profiles-daemon 2>/dev/null; then
-        echo -e "${YELLOW}Stopping power-profiles-daemon (conflicts with TDP control)...${NC}"
-        systemctl stop power-profiles-daemon 2>/dev/null
-    fi
+    for svc in power-profiles-daemon thermald; do
+        if systemctl is-active --quiet "$svc" 2>/dev/null; then
+            echo -e "${YELLOW}Stopping $svc (conflicts with TDP control)...${NC}"
+            systemctl stop "$svc" 2>/dev/null
+            systemctl mask "$svc" 2>/dev/null
+        fi
+    done
 }
 
 set_power() {
@@ -67,28 +70,31 @@ apply_profile() {
     local vals=(${PROFILES[$name]})
     [[ ${#vals[@]} -eq 0 ]] && { echo -e "${RED}Unknown: $name${NC}"; exit 1; }
 
-    # Save current profile name first
     echo "$name" > "$PROFILE_FILE"
 
     stop_conflicting_daemons
+
+    echo -e "${CYAN}Setting PL1=${vals[0]}W PL2=${vals[1]}W...${NC}"
     set_power "${vals[0]}" "${vals[1]}"
 
-    # Check if fan boost is already ON
     local fan=$(cat "$FAN_BOOST_PATH" 2>/dev/null)
     if [[ "$fan" == "1" ]]; then
-        # Keep it ON (requires performance platform)
         set_platform "performance"
     else
-        # Use the profile's default platform
         set_platform "${vals[2]}"
     fi
 
-    # Auto-enable fan boost for turbo profile
     [[ "$name" == "turbo" ]] && set_fanboost 1
+
+    echo -e "${CYAN}Verifying...${NC}"
+    sleep 0.5
+    local check_pl1=$(cat "${RAPL_PATH}/constraint_0_power_limit_uw" 2>/dev/null)
+    local check_pl2=$(cat "${RAPL_PATH}/constraint_1_power_limit_uw" 2>/dev/null)
+    echo -e "${CYAN}Readback: PL1=$((check_pl1 / 1000000))W PL2=$((check_pl2 / 1000000))W${NC}"
 
     mkdir -p "$CONFIG_DIR"
     echo "$name" > "$CONFIG_DIR/last_profile"
-    echo -e "${GREEN}Profile: $name${NC}"
+    echo -e "${GREEN}Profile: $name applied${NC}"
 }
 
 show_status() {
