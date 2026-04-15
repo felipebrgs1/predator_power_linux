@@ -1,23 +1,10 @@
-# Predator Power Manager
-
 # Build
-build/
 dist/
 *.spec
-.venv/
-predator_pkg/resources.py
+node_modules/
 
-# Python
-__pycache__/
-*.pyc
-
-# Kernel module build
-*.o
-*.ko
-*.mod*
-*.cmd
-*.symvers
-*.order
+# Generated
+src/embed.ts
 
 # IDE
 .vscode/

@@ -49,6 +49,7 @@ predator-power
 | `predator-power profile balanced` | Aplica perfil equilibrado (50W/65W) |
 | `predator-power profile turbo` | Aplica perfil máximo (100W/140W) |
 | `predator-power fanboost 1` | Liga o Fan Boost (Turbo das ventoinhas) |
+| `predator-power install-driver` | Instala driver da comunidade Acer (necessário para TDP >35W) |
 | `predator-power service remove` | Remove o serviço de boot |
 
 ---
@@ -68,5 +69,5 @@ predator-power
 - **[1], [2], [3]**: Alternar entre perfis.
 - **[F]**: Ligar/Desligar Fan Boost (Turbo de ventoinha).
 - **[S]**: Ativar/Desativar serviço de boot (Auto Service).
-- **[R]**: Atualizar status manualmente.
+- **[D]**: Instalar/Atualizar driver da comunidade Acer (facer).
 - **[Q]**: Sair da interface.

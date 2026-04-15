@@ -1,0 +1,19 @@
+{
+  "name": "predator-power",
+  "version": "1.0.0",
+  "module": "src/main.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/main.ts",
+    "embed": "bun run gen_embed.ts",
+    "build": "bun run embed && bun build --compile src/main.ts --outfile dist/predator-power",
+    "clean": "rm -rf dist src/embed.ts"
+  },
+  "dependencies": {
+    "@opentui/core": "^0.1.99"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  }
+}
