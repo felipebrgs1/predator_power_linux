@@ -17,6 +17,21 @@ import {
   removeService,
 } from "./power.js";
 
+const cmd = process.argv[2];
+if (cmd === "service") {
+  const action = process.argv[3];
+  if (action === "remove") {
+    console.log(removeService());
+  } else {
+    console.log(installService(action || "balanced"));
+  }
+  process.exit(0);
+} else if (cmd === "profile") {
+  const profile = process.argv[3] || "balanced";
+  console.log(applyProfile(profile));
+  process.exit(0);
+}
+
 let cpuNameCached = "Unknown";
 try {
   const cpuinfo = readFileSync("/proc/cpuinfo", "utf-8");
@@ -37,8 +52,10 @@ function serviceActive(): boolean {
   }
 }
 
+let renderer: any = null;
+
 async function main() {
-  const renderer = await createCliRenderer({
+  renderer = await createCliRenderer({
     exitOnCtrlC: true,
     screenMode: "alternate-screen",
   });
@@ -122,26 +139,50 @@ async function main() {
     const val = option.value;
     if (val === "quit") {
       clearInterval(interval);
-      renderer.destroy();
+      await renderer.destroy();
       process.exit(0);
     } else if (val === "fan") {
       setFanBoost(!showStatus().fan.includes("ON"));
+      setTimeout(updateStatus, 300);
     } else if (val === "driver") {
-      installFacer();
-    } else if (val === "service") {
-      if (await serviceActive()) {
-        removeService();
-      } else {
-        installService();
+      clearInterval(interval);
+      await renderer.destroy();
+      try {
+        console.log(installFacer());
+      } catch (e: any) {
+        console.error("Error installing driver:", e.message || e);
       }
+      process.exit(0);
+    } else if (val === "service") {
+      clearInterval(interval);
+      await renderer.destroy();
+      try {
+        const msg = await serviceActive() ? removeService() : installService();
+        console.log(msg);
+      } catch (e: any) {
+        console.error("Error toggling service:", e.message || e);
+      }
+      process.exit(0);
     } else {
-      applyProfile(val);
+      if (!facerLoaded()) {
+        clearInterval(interval);
+        await renderer.destroy();
+        try {
+          console.log(applyProfile(val));
+        } catch (e: any) {
+          console.error("Error applying profile:", e.message || e);
+        }
+        process.exit(0);
+      } else {
+        applyProfile(val);
+        setTimeout(updateStatus, 300);
+      }
     }
-    setTimeout(updateStatus, 300);
   });
 }
 
-main().catch((e) => {
+main().catch(async (e) => {
   console.error(e);
+  if (renderer) await renderer.destroy();
   process.exit(1);
 });

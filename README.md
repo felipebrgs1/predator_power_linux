@@ -4,16 +4,20 @@ Controle de TDP (PL1/PL2) e Fan Boost para laptops Acer Predator no Linux. Ferra
 
 ---
 
+## Requisitos
+
+- [Bun](https://bun.sh) instalado
+
 ## 🚀 Passo a Passo: Instalação no Sistema
 
 Siga estas etapas para compilar e instalar o programa permanentemente no seu Linux:
 
 ### 1. Compilar o programa
-Certifique-se de ter o Python instalado e execute o script de build para gerar o binário único:
 ```bash
-./build.sh
+bun install
+bun run build
 ```
-O arquivo final será gerado em `dist/predator-power`.
+O arquivo final será gerado em `dist/predator-power` (binário único e independente).
 
 ### 2. Mover para o diretório de binários
 Para que você possa rodar o comando `predator-power` de qualquer lugar, mova-o para `/usr/local/bin`:
@@ -25,10 +29,14 @@ sudo chmod +x /usr/local/bin/predator-power
 ### 3. Configurar inicialização automática (Boot)
 Para garantir que o perfil de energia seja aplicado sempre que você ligar o laptop:
 
-- **Via Interface Visual (Recomendado):** Digite `predator-power` no terminal e pressione a tecla **[S]**. O status deve mudar para `Auto Service: ON`.
+- **Via Interface Visual (Recomendado):** Digite `predator-power` no terminal e pressione a tecla **[S]**.
 - **Via Comando Direto:** 
   ```bash
   sudo predator-power service
+  ```
+  Ou para remover:
+  ```bash
+  sudo predator-power service remove
   ```
 
 ---
@@ -36,7 +44,7 @@ Para garantir que o perfil de energia seja aplicado sempre que você ligar o lap
 ## 🛠️ Como Usar
 
 ### Interface Visual (TUI)
-Basta digitar o comando sem argumentos (ou com `tui`):
+Basta digitar o comando sem argumentos:
 ```bash
 predator-power
 ```
@@ -45,12 +53,13 @@ predator-power
 ### Comandos de Terminal
 | Comando | Descrição |
 |---------|-----------|
-| `predator-power status` | Mostra o TDP e Fan Boost atual |
 | `predator-power profile balanced` | Aplica perfil equilibrado (50W/65W) |
-| `predator-power profile turbo` | Aplica perfil máximo (100W/140W) |
-| `predator-power fanboost 1` | Liga o Fan Boost (Turbo das ventoinhas) |
-| `predator-power install-driver` | Instala driver da comunidade Acer (necessário para TDP >35W) |
+| `predator-power profile performance` | Aplica perfil performance (80W/115W) |
+| `predator-power profile turbo` | Aplica perfil máximo (100W/140W + Fan Boost) |
+| `predator-power service` | Ativa o serviço de boot |
 | `predator-power service remove` | Remove o serviço de boot |
+
+*Nota: A instalação/atualização do driver e o controle manual do Fan Boost são feitos pela interface TUI (atalhos **[D]** e **[F]**).*
 
 ---
 

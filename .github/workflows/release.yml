@@ -16,50 +16,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v1
         with:
-          python-version: "3.12"
+          bun-version: latest
 
-      - name: Install PyInstaller
-        run: pip install pyinstaller
-
-      - name: Generate resources
-        run: python3 gen_resources.py
+      - name: Install dependencies
+        run: bun install
 
       - name: Build binary
-        run: >
-          pyinstaller
-          --onefile
-          --name predator-power
-          --hidden-import curses
-          --hidden-import predator_pkg
-          --hidden-import predator_pkg.resources
-          --collect-all predator_pkg
-          predator-power.py
-
-      - name: Create Release (main branch)
-        if: github.event_name == 'push'
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: v${{ github.run_number }}
-          release_name: Predator Power v${{ github.run_number }}
-          draft: false
-          prerelease: false
+        run: bun run build
 
       - name: Upload to Release (main branch)
         if: github.event_name == 'push'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: dist/predator-power
-          asset_name: predator-power
-          asset_content_type: application/octet-stream
+          tag_name: v${{ github.run_number }}
+          name: Predator Power v${{ github.run_number }}
+          draft: false
+          prerelease: false
+          files: dist/predator-power
 
       - name: Upload to Release (tagged release)
         if: github.event_name == 'release'

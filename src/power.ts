@@ -7,7 +7,7 @@ import { VENDOR_FILES } from "./embed.js";
 
 const RAPL_PATH = "/sys/class/powercap/intel-rapl/intel-rapl:0";
 const FAN_BOOST_PATH = "/sys/devices/platform/acer-thermal-lite/fan_boost";
-const PROFILE_FILE = "/tmp/predator_profile";
+const PROFILE_FILE = `/tmp/predator_profile_${process.getuid?.() || 0}`;
 const CONFIG_DIR = `${process.env.HOME}/.config/predator-power`;
 const FACER_DIR = "/opt/turbo-fan";
 
@@ -23,8 +23,8 @@ export function isRoot() {
   return process.getuid?.() === 0;
 }
 
-export function ensureRoot(args?: string[]) {
-  if (isRoot()) return;
+export function ensureRoot(args?: string[]): boolean {
+  if (isRoot()) return true;
   const exe = process.execPath;
   const script = process.argv[1] || "";
   const extra = args || process.argv.slice(2);
@@ -35,7 +35,7 @@ export function ensureRoot(args?: string[]) {
   } catch {
     spawnSync("sudo", [exe, script, ...extra], { stdio: "inherit" });
   }
-  process.exit(0);
+  return false;
 }
 
 function safeRead(path: string) {
@@ -46,8 +46,13 @@ function safeRead(path: string) {
   }
 }
 
-function safeWrite(path: string, data: string) {
-  writeFileSync(path, data);
+function safeWrite(path: string, data: string): boolean {
+  try {
+    writeFileSync(path, data);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function getVendorRoot() {
@@ -192,7 +197,9 @@ export function applyProfile(name: string): string {
   const p = PROFILES[name];
   if (!p) return `Unknown profile: ${name}`;
 
-  safeWrite(PROFILE_FILE, name);
+  if (!safeWrite(PROFILE_FILE, name)) {
+    return `Permission denied: ${PROFILE_FILE}`;
+  }
   stopConflictingDaemons();
 
   if (!facerLoaded()) {
@@ -226,9 +233,15 @@ export function showStatus() {
   return { pl1, pl2, fan: fan === "1" ? "ON" : "OFF", ec, facer };
 }
 
-export function installService(profile = "balanced") {
-  ensureRoot(["service", profile]);
-  const bin = process.argv[1] ? execSync(`readlink -f "${process.argv[1]}"`, { encoding: "utf-8" }).trim() : process.execPath;
+export function installService(profile = "balanced"): string {
+  if (!ensureRoot(["service", profile])) {
+    return "Elevating permissions...";
+  }
+  const bunBin = process.execPath;
+  const scriptPath = process.argv[1] ? execSync(`readlink -f "${process.argv[1]}"`, { encoding: "utf-8" }).trim() : "";
+  const execStart = scriptPath && scriptPath.endsWith(".ts")
+    ? `${bunBin} ${scriptPath} profile ${profile}`
+    : `${bunBin} profile ${profile}`;
   const unit = `[Unit]
 Description=Predator Power Manager
 After=multi-user.target
@@ -236,7 +249,7 @@ After=multi-user.target
 [Service]
 Type=oneshot
 ExecStartPre=/bin/sleep 3
-ExecStart=${bin} profile ${profile}
+ExecStart=${execStart}
 RemainAfterExit=yes
 
 [Install]
@@ -245,12 +258,18 @@ WantedBy=multi-user.target
   writeFileSync("/etc/systemd/system/predator-power.service", unit);
   execSync("systemctl daemon-reload");
   execSync("systemctl enable predator-power.service");
-  execSync("systemctl start predator-power.service");
+  try {
+    execSync("systemctl start predator-power.service");
+  } catch (e: any) {
+    return `Service enabled but failed to start. Check logs with: journalctl -xeu predator-power.service\n${e.stderr || e.message}`;
+  }
   return "Service installed.";
 }
 
-export function removeService() {
-  ensureRoot(["service", "remove"]);
+export function removeService(): string {
+  if (!ensureRoot(["service", "remove"])) {
+    return "Elevating permissions...";
+  }
   try { execSync("systemctl stop predator-power.service"); } catch {}
   try { execSync("systemctl disable predator-power.service"); } catch {}
   try { rmSync("/etc/systemd/system/predator-power.service", { force: true }); } catch {}
