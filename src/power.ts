@@ -7,13 +7,15 @@ import { VENDOR_FILES } from "./embed.js";
 
 const RAPL_PATH = "/sys/class/powercap/intel-rapl/intel-rapl:0";
 const FAN_BOOST_PATH = "/sys/devices/platform/acer-thermal-lite/fan_boost";
+const THERMAL_PROFILE_PATH = "/sys/devices/platform/acer-wmi/thermal_profile";
+const TURBO_OC_PATH = "/sys/devices/platform/acer-wmi/turbo_oc";
 const PROFILE_FILE = `/tmp/predator_profile_${process.getuid?.() || 0}`;
 const CONFIG_DIR = `${process.env.HOME}/.config/predator-power`;
 const FACER_DIR = "/opt/turbo-fan";
 
 export const PROFILES: Record<string, { pl1: number; pl2: number; platform: string }> = {
   balanced: { pl1: 50, pl2: 65, platform: "balanced" },
-  performance: { pl1: 80, pl2: 115, platform: "balanced-performance" },
+  performance: { pl1: 75, pl2: 100, platform: "balanced-performance" },
   turbo: { pl1: 100, pl2: 140, platform: "performance" },
 };
 
@@ -28,7 +30,6 @@ export function ensureRoot(args?: string[]): boolean {
   const exe = process.execPath;
   const script = process.argv[1] || "";
   const extra = args || process.argv.slice(2);
-  // prefer pkexec if available
   try {
     execSync("which pkexec", { stdio: "ignore" });
     spawnSync("pkexec", [exe, script, ...extra], { stdio: "inherit" });
@@ -58,7 +59,6 @@ function safeWrite(path: string, data: string): boolean {
 export function getVendorRoot() {
   if (vendorDir) return vendorDir;
 
-  // modo dev: vendor/ ao lado do src/
   const currentFile = fileURLToPath(import.meta.url);
   const devVendor = join(dirname(currentFile), "..", "vendor", "acer-turbo-driver");
   if (existsSync(devVendor)) {
@@ -66,7 +66,6 @@ export function getVendorRoot() {
     return vendorDir;
   }
 
-  // standalone: extrair de VENDOR_FILES
   const dir = mkdtempSync(join(tmpdir(), "predator_vendor_"));
   const base = join(dir, "vendor", "acer-turbo-driver");
   for (const [rel, content] of Object.entries(VENDOR_FILES)) {
@@ -97,13 +96,20 @@ export function facerProfilePath() {
   return null;
 }
 
+function isClangKernel(): boolean {
+  try {
+    return readFileSync("/proc/version", "utf-8").includes("clang");
+  } catch {
+    return false;
+  }
+}
+
 export function installFacer(): string {
   const src = join(getVendorRoot(), "acer-turbo-driver");
   if (!existsSync(src)) {
     return "Driver source not found.";
   }
 
-  // instalar deps
   try {
     execSync("which pacman", { stdio: "ignore" });
     execSync("pacman -S --needed --noconfirm git base-devel linux-headers rsync", { stdio: "ignore" });
@@ -115,7 +121,6 @@ export function installFacer(): string {
     } catch {}
   }
 
-  // copiar para /opt/turbo-fan
   rmSync(FACER_DIR, { recursive: true, force: true });
   mkdirSync(FACER_DIR, { recursive: true });
 
@@ -134,20 +139,12 @@ export function installFacer(): string {
   }
   copyRecursive(src, FACER_DIR);
 
-  // patch install.sh
-  const installSh = join(FACER_DIR, "install.sh");
-  let installContent = readFileSync(installSh, "utf-8");
-  installContent = installContent.replace(
-    "/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56/",
-    "/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56*"
-  );
-  writeFileSync(installSh, installContent);
-
   // compilar e carregar
   execSync("chmod +x ./*.sh", { cwd: FACER_DIR });
-  execSync("bash -c 'source ./install.sh'", { cwd: FACER_DIR, stdio: "inherit" });
+  const clang = isClangKernel() ? "CC=clang LD=ld.lld" : "";
+  execSync(`make clean && make ${clang}`, { cwd: FACER_DIR, stdio: "inherit" });
+  execSync("rmmod acer_wmi 2>/dev/null; rmmod facer 2>/dev/null; insmod src/facer.ko", { cwd: FACER_DIR, stdio: "inherit" });
 
-  // instalar serviço turbo-fan
   try {
     execSync("bash -c 'source ./install_service.sh install'", { cwd: FACER_DIR, stdio: "inherit" });
   } catch {}
@@ -170,26 +167,54 @@ export function setPower(pl1: number, pl2: number) {
   safeWrite(join(RAPL_PATH, "constraint_1_power_limit_uw"), String(pl2 * 1_000_000));
 }
 
+// Mapeia nome do perfil para valor do thermal_profile sysfs
+// 0=quiet, 1=balanced, 4=performance
+const PROFILE_TO_THERMAL: Record<string, string> = {
+  balanced: "1",
+  performance: "4",
+  turbo: "4",
+};
+
 export function setPlatform(profile: string) {
+  if (existsSync(THERMAL_PROFILE_PATH)) {
+    const val = PROFILE_TO_THERMAL[profile];
+    if (val) {
+      safeWrite(THERMAL_PROFILE_PATH, val);
+      return;
+    }
+  }
+
   const path = facerProfilePath();
   if (path) {
-    safeWrite(path, profile);
+    const p = PROFILES[profile];
+    safeWrite(path, p?.platform || "balanced");
   }
 }
 
+export function setTurboOC(on: boolean): boolean {
+  if (existsSync(TURBO_OC_PATH)) {
+    return safeWrite(TURBO_OC_PATH, on ? "1" : "0");
+  }
+  return false;
+}
+
 export function readFanBoost(): boolean {
-  return safeRead(FAN_BOOST_PATH) === "1";
+  if (existsSync(FAN_BOOST_PATH)) {
+    return safeRead(FAN_BOOST_PATH) === "1";
+  }
+  return safeRead(TURBO_OC_PATH) === "1";
 }
 
 export function setFanBoost(on: boolean) {
   if (on) {
     setPlatform("performance");
+    setTurboOC(true);
     safeWrite(FAN_BOOST_PATH, "1");
   } else {
+    setTurboOC(false);
     safeWrite(FAN_BOOST_PATH, "0");
     const current = safeRead(PROFILE_FILE) || "balanced";
-    const platform = PROFILES[current]?.platform || "balanced";
-    setPlatform(platform);
+    setPlatform(current);
   }
 }
 
@@ -207,15 +232,16 @@ export function applyProfile(name: string): string {
   }
 
   setPower(p.pl1, p.pl2);
-
-  if (readFanBoost()) {
-    setPlatform("performance");
-  } else {
-    setPlatform(p.platform);
-  }
+  setPlatform(name);
 
   if (name === "turbo") {
-    setFanBoost(true);
+    setTurboOC(true);
+  } else {
+    setTurboOC(false);
+  }
+
+  if (name === "turbo" && existsSync(FAN_BOOST_PATH)) {
+    safeWrite(FAN_BOOST_PATH, "1");
   }
 
   mkdirSync(CONFIG_DIR, { recursive: true });
@@ -226,11 +252,16 @@ export function applyProfile(name: string): string {
 export function showStatus() {
   const pl1 = Math.floor(Number(safeRead(join(RAPL_PATH, "constraint_0_power_limit_uw")) || "0") / 1_000_000);
   const pl2 = Math.floor(Number(safeRead(join(RAPL_PATH, "constraint_1_power_limit_uw")) || "0") / 1_000_000);
-  const fan = safeRead(FAN_BOOST_PATH);
+  const fanLegacy = safeRead(FAN_BOOST_PATH);
+  const turboVal = safeRead(TURBO_OC_PATH);
+  const tpVal = safeRead(THERMAL_PROFILE_PATH);
   const ecPath = facerProfilePath();
-  const ec = ecPath ? safeRead(ecPath) : "N/A";
+  const ecRaw = ecPath ? safeRead(ecPath) : tpVal || "";
+  const PROFILE_NAMES: Record<string, string> = { "0": "Quiet", "1": "Balanced", "4": "Performance" };
+  const ec = PROFILE_NAMES[ecRaw] || (ecRaw ? `Mode ${ecRaw}` : "N/A");
   const facer = facerLoaded() ? "ACTIVE" : "MISSING";
-  return { pl1, pl2, fan: fan === "1" ? "ON" : "OFF", ec, facer };
+  const fan = fanLegacy === "1" ? "ON" : turboVal === "1" ? "TURBO" : "OFF";
+  return { pl1, pl2, fan, ec, facer };
 }
 
 export function installService(profile = "balanced"): string {

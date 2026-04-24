@@ -650,6 +650,7 @@ static struct quirk_entry quirk_acer_predator_pt316_51s = {
     .turbo = 1,
     .cpu_fans = 1,
     .gpu_fans = 1,
+    .predator_v4 = 1,
 };
 static struct quirk_entry quirk_acer_predator_pt515_51 = {
 	.turbo = 1,
@@ -2814,13 +2815,15 @@ acer_predator_v4_platform_profile_set(struct platform_profile_handler *pprof,
 static int
 acer_predator_v4_platform_profile_probe(void *drvdata, unsigned long *choices)
 {
-	unsigned long supported_profiles;
+	unsigned long supported_profiles = 0;
 	int err;
 
 	err = WMID_gaming_get_misc_setting(ACER_WMID_MISC_SETTING_SUPPORTED_PROFILES,
 					   (u8 *)&supported_profiles);
-	if (err)
-		return err;
+	if (err) {
+		pr_warn("Could not query supported thermal profiles, assuming all profiles available\n");
+		supported_profiles = 0xFF;
+	}
 
 	/* Iterate through supported profiles in order of increasing performance */
 	if (test_bit(ACER_PREDATOR_V4_THERMAL_PROFILE_ECO, &supported_profiles)) {
@@ -3575,6 +3578,105 @@ static u32 get_wmid_devices(void)
 static int acer_wmi_hwmon_init(void);
 
 /*
+ * Direct sysfs interface for setting thermal profile
+ * Bypasses the platform_profile framework for broader compatibility
+ */
+static ssize_t thermal_profile_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	if (!wmi_has_guid(WMID_GUID4))
+		return -EOPNOTSUPP;
+
+#if RTLNX_VER_MIN(6, 14, 0)
+	u8 tp;
+	int err = WMID_gaming_get_misc_setting(ACER_WMID_MISC_SETTING_PLATFORM_PROFILE, &tp);
+	if (err)
+		return err;
+	return sysfs_emit(buf, "%d\n", tp);
+#else
+	u8 tp;
+	int err = ec_read(ACER_PREDATOR_V4_THERMAL_PROFILE_EC_OFFSET, &tp);
+	if (err < 0)
+		return err;
+	return sysfs_emit(buf, "%d\n", tp);
+#endif
+}
+
+static ssize_t thermal_profile_store(struct device *dev,
+				     struct device_attribute *attr,
+				     const char *buf, size_t count)
+{
+	int tp;
+	int err;
+
+	if (!wmi_has_guid(WMID_GUID4))
+		return -EOPNOTSUPP;
+
+	err = kstrtoint(buf, 0, &tp);
+	if (err)
+		return err;
+
+	if (tp < 0 || tp > 4)
+		return -EINVAL;
+
+#if RTLNX_VER_MIN(6, 14, 0)
+	err = WMID_gaming_set_misc_setting(ACER_WMID_MISC_SETTING_PLATFORM_PROFILE, tp);
+	if (err)
+		return err;
+#else
+	acpi_status status;
+	status = WMI_gaming_execute_u64(
+		ACER_WMID_SET_GAMING_MISC_SETTING_METHODID, tp, NULL);
+	if (ACPI_FAILURE(status))
+		return -EIO;
+#endif
+
+	return count;
+}
+static DEVICE_ATTR_RW(thermal_profile);
+
+/*
+ * Direct sysfs for turbo OC mode (bypasses platform_profile)
+ */
+static ssize_t turbo_oc_show(struct device *dev,
+			     struct device_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", turbo_state);
+}
+
+static ssize_t turbo_oc_store(struct device *dev,
+			      struct device_attribute *attr,
+			      const char *buf, size_t count)
+{
+	bool enable;
+	int err;
+
+	if (!(interface->capability & ACER_CAP_TURBO_OC))
+		return -EOPNOTSUPP;
+
+	err = kstrtobool(buf, &enable);
+	if (err)
+		return err;
+
+	if (enable) {
+		turbo_state = 1;
+		WMID_gaming_set_u64(0x10001, ACER_CAP_TURBO_LED);
+		WMID_gaming_set_fan_mode(0x2);
+		WMID_gaming_set_u64(0x205, ACER_CAP_TURBO_OC);
+		WMID_gaming_set_u64(0x207, ACER_CAP_TURBO_OC);
+	} else {
+		turbo_state = 0;
+		WMID_gaming_set_u64(0x1, ACER_CAP_TURBO_LED);
+		WMID_gaming_set_fan_mode(0x1);
+		WMID_gaming_set_u64(0x5, ACER_CAP_TURBO_OC);
+		WMID_gaming_set_u64(0x7, ACER_CAP_TURBO_OC);
+	}
+
+	return count;
+}
+static DEVICE_ATTR_RW(turbo_oc);
+
+/*
  * Platform device
  */
 static int acer_platform_probe(struct platform_device *device)
@@ -3604,8 +3706,17 @@ static int acer_platform_probe(struct platform_device *device)
 		err = acer_platform_profile_setup();
 		#endif
 		if (err)
-			goto error_platform_profile;
+			pr_warn("platform_profile setup failed, using direct sysfs instead\n");
 	}
+
+	/* Always create the direct thermal_profile sysfs interface */
+	err = device_create_file(&device->dev, &dev_attr_thermal_profile);
+	if (err)
+		goto error_thermal_profile;
+
+	err = device_create_file(&device->dev, &dev_attr_turbo_oc);
+	if (err)
+		goto error_turbo_oc;
 
 	if (has_cap(ACER_CAP_FAN_SPEED_READ)) {
 		err = acer_wmi_hwmon_init();
@@ -3616,7 +3727,12 @@ static int acer_platform_probe(struct platform_device *device)
 	return 0;
 
 	error_hwmon:
-	error_platform_profile:
+		device_remove_file(&device->dev, &dev_attr_turbo_oc);
+	error_turbo_oc:
+		device_remove_file(&device->dev, &dev_attr_thermal_profile);
+	error_thermal_profile:
+		if (has_cap(ACER_CAP_PLATFORM_PROFILE))
+			platform_profile_remove(&device->dev);
 		acer_rfkill_exit();
 	error_rfkill:
 		if (has_cap(ACER_CAP_BRIGHTNESS))
@@ -3630,6 +3746,8 @@ static int acer_platform_probe(struct platform_device *device)
 
 static void acer_platform_remove(struct platform_device *device)
 {
+	device_remove_file(&device->dev, &dev_attr_turbo_oc);
+	device_remove_file(&device->dev, &dev_attr_thermal_profile);
 	if (has_cap(ACER_CAP_MAILLED))
 		acer_led_exit();
 	if (has_cap(ACER_CAP_BRIGHTNESS))

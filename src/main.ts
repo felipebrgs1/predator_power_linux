@@ -1,10 +1,3 @@
-import {
-  createCliRenderer,
-  BoxRenderable,
-  TextRenderable,
-  SelectRenderable,
-  SelectRenderableEvents,
-} from "@opentui/core";
 import { readFileSync } from "fs";
 import { execSync } from "child_process";
 import {
@@ -15,6 +8,7 @@ import {
   facerLoaded,
   installService,
   removeService,
+  isRoot,
 } from "./power.js";
 
 const cmd = process.argv[2];
@@ -43,146 +37,69 @@ try {
   }
 } catch {}
 
-function serviceActive(): boolean {
-  try {
-    const out = execSync("systemctl is-active predator-power", { encoding: "utf-8" });
-    return out.trim() === "active";
-  } catch {
-    return false;
-  }
+function draw() {
+  const s = showStatus();
+  const facer = facerLoaded();
+  const warn = isRoot() ? "" : "  (!) Use sudo ou pkexec\n";
+  process.stdout.write(
+    "\x1Bc" +
+    `  PREDATOR POWER MANAGER\n` +
+    `  CPU: ${cpuNameCached}\n` +
+    `  PL1: ${s.pl1}W  PL2: ${s.pl2}W  Fan: ${s.fan}  Mode: ${s.ec}\n` +
+    `  Facer: ${facer ? "ACTIVE" : "MISSING"}\n` +
+    warn +
+    `\n` +
+    `  [1] Balanced     50W/65W\n` +
+    `  [2] Performance  75W/100W +Turbo OC\n` +
+    `  [3] Turbo       100W/140W +Turbo OC\n` +
+    `  [F]an  [D]river  [S]ervice  [Q]uit\n`
+  );
 }
 
-let renderer: any = null;
+function restore() {
+  try { process.stdin.setRawMode(false); } catch {}
+  process.stdin.pause();
+}
 
-async function main() {
-  renderer = await createCliRenderer({
-    exitOnCtrlC: true,
-    screenMode: "alternate-screen",
-  });
-  renderer.start();
+function main() {
+  if (!process.stdin.isTTY) {
+    console.log("Not a TTY. Use: predator-power profile <name>");
+    process.exit(1);
+  }
+  try { process.stdin.setRawMode(true); } catch {}
+  process.stdin.resume();
+  process.stdin.setEncoding("utf-8");
 
-  const root = renderer.root;
-  root.flexDirection = "column";
-  root.padding = 1;
-  root.gap = 1;
+  process.on("SIGINT", () => { restore(); process.exit(0); });
+  draw();
 
-  const header = new TextRenderable(renderer, {
-    id: "header",
-    content: " {bold}PREDATOR POWER MANAGER{/bold} ",
-  });
-  root.add(header);
-
-  const statusBox = new BoxRenderable(renderer, {
-    id: "statusBox",
-    border: true,
-    title: " Status ",
-    padding: 1,
-    flexDirection: "column",
-    gap: 0,
-  });
-  root.add(statusBox);
-
-  const cpuText = new TextRenderable(renderer, {
-    id: "cpu",
-    content: `CPU: ${cpuNameCached}`,
-  });
-  const plText = new TextRenderable(renderer, {
-    id: "pl",
-    content: "PL1: ?W  PL2: ?W",
-  });
-  const fanText = new TextRenderable(renderer, {
-    id: "fan",
-    content: "Fan Boost: ?",
-  });
-  const ecText = new TextRenderable(renderer, {
-    id: "ec",
-    content: "EC: N/A  Facer: ?",
-  });
-
-  statusBox.add(cpuText);
-  statusBox.add(plText);
-  statusBox.add(fanText);
-  statusBox.add(ecText);
-
-  const actions = new SelectRenderable(renderer, {
-    id: "actions",
-    options: [
-      { name: "Balanced", description: "PL1=50W PL2=65W", value: "balanced" },
-      { name: "Performance", description: "PL1=80W PL2=115W", value: "performance" },
-      { name: "Turbo", description: "PL1=100W PL2=140W + Fan Boost", value: "turbo" },
-      { name: "Toggle Fan Boost", description: "Liga/desliga ventoinha turbo", value: "fan" },
-      { name: "Install Driver", description: "Instala driver Acer (facer)", value: "driver" },
-      { name: "Toggle Boot Service", description: "Ativa/desativa serviço de boot", value: "service" },
-      { name: "Quit", description: "Sair", value: "quit" },
-    ],
-    wrapSelection: true,
-    border: true,
-    title: " Actions ",
-    flexGrow: 1,
-  });
-  root.add(actions);
-
-  actions.focus();
-
-  const updateStatus = async () => {
-    const s = showStatus();
-    plText.content = `PL1: {yellow}${s.pl1}W{/yellow}  PL2: {yellow}${s.pl2}W{/yellow}`;
-    fanText.content = `Fan Boost: ${s.fan === "ON" ? "{green}" + s.fan + "{/green}" : "{yellow}" + s.fan + "{/yellow}"}`;
-    ecText.content = `EC: {cyan}${s.ec}{/cyan}  Facer: ${s.facer === "ACTIVE" ? "{green}" + s.facer + "{/green}" : "{red}" + s.facer + "{/red}"}`;
-    renderer.requestRender();
-  };
-
-  await updateStatus();
-  const interval = setInterval(updateStatus, 1000);
-
-  actions.on(SelectRenderableEvents.ITEM_SELECTED, async (_index: number, option: any) => {
-    const val = option.value;
-    if (val === "quit") {
-      clearInterval(interval);
-      await renderer.destroy();
+  process.stdin.on("data", (data: string) => {
+    const key = data.toLowerCase();
+    if (key === "q" || key === "\x1b" || key === "\x03") {
+      restore();
       process.exit(0);
-    } else if (val === "fan") {
+    } else if (key === "f") {
       setFanBoost(!showStatus().fan.includes("ON"));
-      setTimeout(updateStatus, 300);
-    } else if (val === "driver") {
-      clearInterval(interval);
-      await renderer.destroy();
-      try {
-        console.log(installFacer());
-      } catch (e: any) {
-        console.error("Error installing driver:", e.message || e);
-      }
+      draw();
+    } else if (key === "d") {
+      restore();
+      try { console.log(installFacer()); } catch (e: any) { console.error("Error:", e.message || e); }
       process.exit(0);
-    } else if (val === "service") {
-      clearInterval(interval);
-      await renderer.destroy();
+    } else if (key === "s") {
+      restore();
       try {
-        const msg = await serviceActive() ? removeService() : installService();
-        console.log(msg);
-      } catch (e: any) {
-        console.error("Error toggling service:", e.message || e);
-      }
+        let active = false;
+        try { const out = execSync("systemctl is-active predator-power", { encoding: "utf-8" }); active = out.trim() === "active"; } catch {}
+        console.log(active ? removeService() : installService());
+      } catch (e: any) { console.error("Error:", e.message || e); }
       process.exit(0);
-    } else {
-      if (!facerLoaded()) {
-        clearInterval(interval);
-        await renderer.destroy();
-        try {
-          console.log(applyProfile(val));
-        } catch (e: any) {
-          console.error("Error applying profile:", e.message || e);
-        }
-        process.exit(0);
-      } else {
-        applyProfile(val);
-        setTimeout(updateStatus, 300);
-      }
+    } else if (key === "1" || key === "2" || key === "3") {
+      const profiles = ["balanced", "performance", "turbo"];
+      const profile = profiles[parseInt(key) - 1];
+      console.log(applyProfile(profile));
+      draw();
     }
   });
 }
 
-main().catch(async (e) => {
-  console.error(e);
-  if (renderer) await renderer.destroy();
-  process.exit(1);
-});
+main();
