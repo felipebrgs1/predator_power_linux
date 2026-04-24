@@ -268,11 +268,9 @@ export function installService(profile = "balanced"): string {
   if (!ensureRoot(["service", profile])) {
     return "Elevating permissions...";
   }
-  const bunBin = process.execPath;
-  const scriptPath = process.argv[1] ? execSync(`readlink -f "${process.argv[1]}"`, { encoding: "utf-8" }).trim() : "";
-  const execStart = scriptPath && scriptPath.endsWith(".ts")
-    ? `${bunBin} ${scriptPath} profile ${profile}`
-    : `${bunBin} profile ${profile}`;
+
+  const exe = process.execPath;
+  const execStart = `${exe} profile ${profile}`;
   const unit = `[Unit]
 Description=Predator Power Manager
 After=multi-user.target
