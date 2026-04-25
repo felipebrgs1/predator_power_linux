@@ -104,12 +104,21 @@ function isClangKernel(): boolean {
   }
 }
 
+function isNixOS(): boolean {
+  try {
+    return existsSync("/etc/NIXOS");
+  } catch {
+    return false;
+  }
+}
+
 export function installFacer(): string {
   const src = join(getVendorRoot(), "acer-turbo-driver");
   if (!existsSync(src)) {
     return "Driver source not found.";
   }
 
+  let useNix = false;
   try {
     execSync("which pacman", { stdio: "ignore" });
     execSync("pacman -S --needed --noconfirm git base-devel linux-headers rsync", { stdio: "ignore" });
@@ -118,7 +127,12 @@ export function installFacer(): string {
       execSync("which apt-get", { stdio: "ignore" });
       const kernel = execSync("uname -r", { encoding: "utf-8" }).trim();
       execSync(`apt-get install -y git build-essential linux-headers-${kernel} rsync`, { stdio: "ignore" });
-    } catch {}
+    } catch {
+      try {
+        execSync("which nix-shell", { stdio: "ignore" });
+        useNix = true;
+      } catch {}
+    }
   }
 
   rmSync(FACER_DIR, { recursive: true, force: true });
@@ -139,10 +153,58 @@ export function installFacer(): string {
   }
   copyRecursive(src, FACER_DIR);
 
-  // compilar e carregar
   execSync("chmod +x ./*.sh", { cwd: FACER_DIR });
   const clang = isClangKernel() ? "CC=clang LD=ld.lld" : "";
-  execSync(`make clean && make ${clang}`, { cwd: FACER_DIR, stdio: "inherit" });
+  const kernelRelease = execSync("uname -r", { encoding: "utf-8" }).trim();
+  let kernelDir = `/lib/modules/${kernelRelease}/build`;
+  if (!existsSync(kernelDir)) {
+    const nixPaths = [
+      `/run/current-system/kernel-modules/lib/modules/${kernelRelease}/build`,
+      `/run/booted-system/kernel-modules/lib/modules/${kernelRelease}/build`,
+    ];
+    for (const p of nixPaths) {
+      if (existsSync(p)) {
+        kernelDir = p;
+        break;
+      }
+    }
+  }
+  if (!existsSync(kernelDir)) {
+    try {
+      const nixStorePath = execSync(
+        `ls -d /nix/store/*-linux-${kernelRelease}-dev/lib/modules/${kernelRelease}/build 2>/dev/null | head -n1`,
+        { encoding: "utf-8" }
+      ).trim();
+      if (nixStorePath && existsSync(nixStorePath)) {
+        kernelDir = nixStorePath;
+      }
+    } catch {}
+  }
+  if (!existsSync(kernelDir) && useNix) {
+    try {
+      kernelDir = execSync(
+        `nix-shell -p linuxPackages_latest.kernel.dev --run "ls -d /nix/store/*-linux-${kernelRelease}-dev/lib/modules/${kernelRelease}/build | head -n1"`,
+        { encoding: "utf-8" }
+      ).trim();
+    } catch {}
+  }
+  if (!existsSync(kernelDir)) {
+    throw new Error(
+      `Kernel build directory not found for ${kernelRelease} (looked at ${kernelDir}). ` +
+        `On NixOS, ensure your kernel package includes the dev output (e.g., via boot.kernelPackages).`
+    );
+  }
+
+  if (useNix) {
+    const nixPkgs = isClangKernel() ? "gcc gnumake perl clang" : "gcc gnumake perl";
+    execSync(`nix-shell -p ${nixPkgs} --run 'export KERNELDIR=${kernelDir} && make clean && make ${clang}'`, {
+      cwd: FACER_DIR,
+      stdio: "inherit",
+    });
+  } else {
+    execSync(`make clean && make ${clang}`, { cwd: FACER_DIR, stdio: "inherit", env: { ...process.env, KERNELDIR: kernelDir } });
+  }
+
   execSync("rmmod acer_wmi 2>/dev/null; rmmod facer 2>/dev/null; insmod src/facer.ko", { cwd: FACER_DIR, stdio: "inherit" });
 
   try {
@@ -153,11 +215,14 @@ export function installFacer(): string {
 }
 
 export function stopConflictingDaemons() {
+  const nixos = isNixOS();
   for (const svc of ["power-profiles-daemon", "thermald"]) {
     try {
       execSync(`systemctl is-active --quiet ${svc}`);
       execSync(`systemctl stop ${svc}`);
-      execSync(`systemctl mask ${svc}`);
+      if (!nixos) {
+        execSync(`systemctl mask ${svc}`);
+      }
     } catch {}
   }
 }
@@ -267,6 +332,10 @@ export function showStatus() {
 export function installService(profile = "balanced"): string {
   if (!ensureRoot(["service", profile])) {
     return "Elevating permissions...";
+  }
+
+  if (isNixOS()) {
+    return "NixOS manages systemd units declaratively. Please add the service to your configuration.nix instead.";
   }
 
   const exe = process.execPath;
