@@ -314,6 +314,102 @@ export function applyProfile(name: string): string {
   return `Profile ${name} applied.`;
 }
 
+let thermalTimer: ReturnType<typeof setInterval> | null = null;
+
+export function stopThermalControl() {
+  if (thermalTimer) {
+    clearInterval(thermalTimer);
+    thermalTimer = null;
+  }
+}
+
+export function findPackageTempPath(): string | null {
+  try {
+    const thermalDir = "/sys/class/thermal";
+    for (const zone of readdirSync(thermalDir)) {
+      if (!zone.startsWith("thermal_zone")) continue;
+      const typePath = join(thermalDir, zone, "type");
+      const tempPath = join(thermalDir, zone, "temp");
+      if (!existsSync(tempPath) || !existsSync(typePath)) continue;
+      const type = readFileSync(typePath, "utf-8").trim().toLowerCase();
+      if (type.includes("pkg") || type === "x86_pkg_temp" || type.includes("k10") || type === "tctl" || type === "cpu-thermal") {
+        return tempPath;
+      }
+    }
+  } catch {}
+
+  try {
+    const hwmonDir = "/sys/class/hwmon";
+    for (const entry of readdirSync(hwmonDir)) {
+      const namePath = join(hwmonDir, entry, "name");
+      if (!existsSync(namePath)) continue;
+      const name = readFileSync(namePath, "utf-8").trim().toLowerCase();
+      if (name !== "coretemp" && name !== "k10temp") continue;
+      for (const sub of readdirSync(join(hwmonDir, entry))) {
+        if (!sub.endsWith("_input")) continue;
+        const labelPath = join(hwmonDir, entry, sub.replace("_input", "_label"));
+        if (existsSync(labelPath)) {
+          const label = readFileSync(labelPath, "utf-8").trim().toLowerCase();
+          if (label.includes("package") || label.includes("tctl") || label.includes("tdie")) {
+            return join(hwmonDir, entry, sub);
+          }
+        }
+        return join(hwmonDir, entry, sub);
+      }
+    }
+  } catch {}
+
+  return null;
+}
+
+export function readCpuTemp(tempPath: string): number | null {
+  try {
+    return parseInt(readFileSync(tempPath, "utf-8").trim()) / 1000;
+  } catch {
+    return null;
+  }
+}
+
+export function thermalControl(
+  targetTemp: number,
+  maxPL1: number,
+  maxPL2: number,
+  onUpdate?: (temp: number, pl1: number, pl2: number) => void,
+  minPL: number = 10
+): string {
+  const tempPath = findPackageTempPath();
+  if (!tempPath) return "CPU temperature sensor not found.";
+
+  stopThermalControl();
+
+  const kp = 5;
+  const ki = 0.1;
+  let integral = 0;
+  let pl1 = maxPL1;
+  const pl2ratio = maxPL2 / maxPL1;
+
+  setPower(maxPL1, maxPL2);
+
+  thermalTimer = setInterval(() => {
+    const temp = readCpuTemp(tempPath);
+    if (temp === null) return;
+
+    const error = temp - targetTemp;
+    integral += error * 2;
+    integral = Math.max(-100, Math.min(100, integral));
+
+    const adj = kp * error + ki * integral;
+    pl1 = Math.max(minPL, Math.min(maxPL1, pl1 - adj));
+    const pl2 = Math.max(minPL, Math.min(maxPL2, Math.round(pl1 * pl2ratio)));
+
+    setPower(Math.round(pl1), Math.round(pl2));
+
+    if (onUpdate) onUpdate(temp, Math.round(pl1), Math.round(pl2));
+  }, 2000);
+
+  return `Thermal control active: target ${targetTemp}°C (max PL1=${maxPL1}W PL2=${maxPL2}W)`;
+}
+
 export function showStatus() {
   const pl1 = Math.floor(Number(safeRead(join(RAPL_PATH, "constraint_0_power_limit_uw")) || "0") / 1_000_000);
   const pl2 = Math.floor(Number(safeRead(join(RAPL_PATH, "constraint_1_power_limit_uw")) || "0") / 1_000_000);
