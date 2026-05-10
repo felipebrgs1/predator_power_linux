@@ -4,8 +4,8 @@ import {
   applyProfile,
   setFanBoost,
   showStatus,
-  installFacer,
-  facerLoaded,
+  installDriver,
+  driverLoaded,
   installService,
   removeService,
   isRoot,
@@ -68,18 +68,18 @@ try {
 
 function draw() {
   const s = showStatus();
-  const facer = facerLoaded();
+  const driver = driverLoaded();
   const warn = isRoot() ? "" : "  (!) Use sudo ou pkexec\n";
   process.stdout.write(
     "\x1Bc" +
     `  PREDATOR POWER MANAGER\n` +
     `  CPU: ${cpuNameCached}\n` +
     `  PL1: ${s.pl1}W  PL2: ${s.pl2}W  Fan: ${s.fan}  Mode: ${s.ec}\n` +
-    `  Facer: ${facer ? "ACTIVE" : "MISSING"}\n` +
+    `  Driver: ${driver ? "ACTIVE" : "MISSING"}\n` +
     warn +
     `\n` +
     `  [1] Balanced     50W/65W\n` +
-    `  [2] Performance  75W/100W +Turbo OC\n` +
+    `  [2] Performance  75W/100W\n` +
     `  [3] Turbo       100W/140W +Turbo OC\n` +
     `  [4] Thermal     40-80W range @80°C target\n` +
     `  [F]an  [D]river  [S]ervice  [Q]uit\n`
@@ -126,7 +126,7 @@ function main() {
       draw();
     } else if (key === "d") {
       restore();
-      try { console.log(installFacer()); } catch (e: any) { console.error("Error:", e.message || e); }
+      try { console.log(installDriver()); } catch (e: any) { console.error("Error:", e.message || e); }
       process.exit(0);
     } else if (key === "s") {
       restore();

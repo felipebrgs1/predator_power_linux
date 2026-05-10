@@ -1,6 +1,6 @@
 # Predator Power Manager (Acer Predator)
 
-Controle de TDP (PL1/PL2) e Fan Boost para laptops Acer Predator no Linux.
+Controle de TDP (PL1/PL2), perfil térmico, Fan Boost e Turbo OC para laptops Acer Predator no Linux.
 
 ## Instalação
 
@@ -18,7 +18,7 @@ sudo cp dist/predator-power /usr/local/bin/
 ```bash
 sudo predator-power
 ```
-Teclas: **1 2 3** = perfis, **F** = fan, **D** = instalar driver, **S** = service boot, **Q** = sair
+Teclas: **1 2 3** = perfis, **F** = fan/turbo, **D** = instalar driver, **S** = service boot, **Q** = sair
 
 ### Linha de comando
 ```bash
@@ -40,4 +40,14 @@ predator-power service remove     # remover boot
 ## Requisitos
 
 - Linux (testado em CachyOS, Arch)
-- `linux-headers` (para compilar o driver facer)
+- `linux-headers` (para compilar o driver `predator_power`)
+
+## Driver
+
+O projeto usa um driver próprio e mínimo, sem RGB de teclado:
+
+- módulo: `predator_power`
+- sysfs: `/sys/devices/platform/predator-power/`
+- boot: `/etc/modules-load.d/predator_power.conf`
+
+O botão **D** instala o módulo, remove o serviço legado `turbo-fan` se existir e deixa o driver carregando automaticamente no boot.

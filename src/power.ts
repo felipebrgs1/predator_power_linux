@@ -6,12 +6,17 @@ import { fileURLToPath } from "url";
 import { VENDOR_FILES } from "./embed.js";
 
 const RAPL_PATH = "/sys/class/powercap/intel-rapl/intel-rapl:0";
-const FAN_BOOST_PATH = "/sys/devices/platform/acer-thermal-lite/fan_boost";
-const THERMAL_PROFILE_PATH = "/sys/devices/platform/acer-wmi/thermal_profile";
-const TURBO_OC_PATH = "/sys/devices/platform/acer-wmi/turbo_oc";
+const DRIVER_MODULE = "predator_power";
+const DRIVER_SOURCE_DIR = "predator-power-driver";
+const DRIVER_DIR = "/usr/src/predator-power-driver";
+const DRIVER_MODULES_LOAD_CONF = `/etc/modules-load.d/${DRIVER_MODULE}.conf`;
+const POWER_DEVICE_DIR = "/sys/devices/platform/predator-power";
+const FAN_BOOST_PATH = `${POWER_DEVICE_DIR}/fan_boost`;
+const THERMAL_PROFILE_PATH = `${POWER_DEVICE_DIR}/thermal_profile`;
+const TURBO_OC_PATH = `${POWER_DEVICE_DIR}/turbo_oc`;
+const LEGACY_FACER_DIR = "/opt/turbo-fan";
 const PROFILE_FILE = `/tmp/predator_profile_${process.getuid?.() || 0}`;
 const CONFIG_DIR = `${process.env.HOME}/.config/predator-power`;
-const FACER_DIR = "/opt/turbo-fan";
 
 export const PROFILES: Record<string, { pl1: number; pl2: number; platform: string }> = {
   balanced: { pl1: 50, pl2: 65, platform: "balanced" },
@@ -60,14 +65,14 @@ export function getVendorRoot() {
   if (vendorDir) return vendorDir;
 
   const currentFile = fileURLToPath(import.meta.url);
-  const devVendor = join(dirname(currentFile), "..", "vendor", "acer-turbo-driver");
+  const devVendor = join(dirname(currentFile), "..", "vendor", DRIVER_SOURCE_DIR);
   if (existsSync(devVendor)) {
     vendorDir = dirname(devVendor);
     return vendorDir;
   }
 
   const dir = mkdtempSync(join(tmpdir(), "predator_vendor_"));
-  const base = join(dir, "vendor", "acer-turbo-driver");
+  const base = join(dir, "vendor", DRIVER_SOURCE_DIR);
   for (const [rel, content] of Object.entries(VENDOR_FILES)) {
     const full = join(base, rel);
     mkdirSync(dirname(full), { recursive: true });
@@ -77,15 +82,15 @@ export function getVendorRoot() {
   return vendorDir;
 }
 
-export function facerLoaded() {
+export function driverLoaded() {
   try {
-    return readFileSync("/proc/modules", "utf-8").includes("facer");
+    return readFileSync("/proc/modules", "utf-8").includes(DRIVER_MODULE);
   } catch {
     return false;
   }
 }
 
-export function facerProfilePath() {
+export function platformProfilePath() {
   try {
     const entries = readdirSync("/sys/class/platform-profile");
     for (const entry of entries) {
@@ -112,21 +117,29 @@ function isNixOS(): boolean {
   }
 }
 
-export function installFacer(): string {
-  const src = join(getVendorRoot(), "acer-turbo-driver");
+function archHeadersPackage(kernelRelease: string): string {
+  if (kernelRelease.includes("cachyos")) return "linux-cachyos-headers";
+  if (kernelRelease.includes("zen")) return "linux-zen-headers";
+  if (kernelRelease.includes("lts")) return "linux-lts-headers";
+  if (kernelRelease.includes("hardened")) return "linux-hardened-headers";
+  return "linux-headers";
+}
+
+export function installDriver(): string {
+  const src = join(getVendorRoot(), DRIVER_SOURCE_DIR);
   if (!existsSync(src)) {
     return "Driver source not found.";
   }
 
+  const kernelRelease = execSync("uname -r", { encoding: "utf-8" }).trim();
   let useNix = false;
   try {
     execSync("which pacman", { stdio: "ignore" });
-    execSync("pacman -S --needed --noconfirm git base-devel linux-headers rsync", { stdio: "ignore" });
+    execSync(`pacman -S --needed --noconfirm base-devel ${archHeadersPackage(kernelRelease)}`, { stdio: "ignore" });
   } catch {
     try {
       execSync("which apt-get", { stdio: "ignore" });
-      const kernel = execSync("uname -r", { encoding: "utf-8" }).trim();
-      execSync(`apt-get install -y git build-essential linux-headers-${kernel} rsync`, { stdio: "ignore" });
+      execSync(`apt-get install -y build-essential linux-headers-${kernelRelease} kmod`, { stdio: "ignore" });
     } catch {
       try {
         execSync("which nix-shell", { stdio: "ignore" });
@@ -135,8 +148,8 @@ export function installFacer(): string {
     }
   }
 
-  rmSync(FACER_DIR, { recursive: true, force: true });
-  mkdirSync(FACER_DIR, { recursive: true });
+  rmSync(DRIVER_DIR, { recursive: true, force: true });
+  mkdirSync(DRIVER_DIR, { recursive: true });
 
   function copyRecursive(from: string, to: string) {
     for (const entry of readdirSync(from)) {
@@ -151,11 +164,9 @@ export function installFacer(): string {
       }
     }
   }
-  copyRecursive(src, FACER_DIR);
+  copyRecursive(src, DRIVER_DIR);
 
-  execSync("chmod +x ./*.sh", { cwd: FACER_DIR });
   const clang = isClangKernel() ? "CC=clang LD=ld.lld" : "";
-  const kernelRelease = execSync("uname -r", { encoding: "utf-8" }).trim();
   let kernelDir = `/lib/modules/${kernelRelease}/build`;
   if (!existsSync(kernelDir)) {
     const nixPaths = [
@@ -198,20 +209,35 @@ export function installFacer(): string {
   if (useNix) {
     const nixPkgs = isClangKernel() ? "gcc gnumake perl clang" : "gcc gnumake perl";
     execSync(`nix-shell -p ${nixPkgs} --run 'export KERNELDIR=${kernelDir} && make clean && make ${clang}'`, {
-      cwd: FACER_DIR,
+      cwd: DRIVER_DIR,
       stdio: "inherit",
     });
   } else {
-    execSync(`make clean && make ${clang}`, { cwd: FACER_DIR, stdio: "inherit", env: { ...process.env, KERNELDIR: kernelDir } });
+    execSync(`make clean && make ${clang}`, { cwd: DRIVER_DIR, stdio: "inherit", env: { ...process.env, KERNELDIR: kernelDir } });
   }
 
-  execSync("rmmod acer_wmi 2>/dev/null; rmmod facer 2>/dev/null; insmod src/facer.ko", { cwd: FACER_DIR, stdio: "inherit" });
+  const moduleFile = join(DRIVER_DIR, "src", `${DRIVER_MODULE}.ko`);
+  if (!existsSync(moduleFile)) {
+    throw new Error(`Kernel module was not built: ${moduleFile}`);
+  }
 
-  try {
-    execSync("bash -c 'source ./install_service.sh install'", { cwd: FACER_DIR, stdio: "inherit" });
-  } catch {}
+  const moduleInstallDir = `/lib/modules/${kernelRelease}/extra`;
+  mkdirSync(moduleInstallDir, { recursive: true });
+  writeFileSync(join(moduleInstallDir, `${DRIVER_MODULE}.ko`), readFileSync(moduleFile));
 
-  return "Driver installed and loaded.";
+  try { execSync("systemctl disable --now turbo-fan.service", { stdio: "ignore" }); } catch {}
+  try { rmSync("/etc/systemd/system/turbo-fan.service", { force: true }); } catch {}
+  try { execSync("systemctl daemon-reload", { stdio: "ignore" }); } catch {}
+  try { rmSync("/etc/modules-load.d/facer.conf", { force: true }); } catch {}
+  try { execSync("modprobe -r facer", { stdio: "ignore" }); } catch { try { execSync("rmmod facer", { stdio: "ignore" }); } catch {} }
+  try { rmSync(LEGACY_FACER_DIR, { recursive: true, force: true }); } catch {}
+
+  execSync("depmod -a", { stdio: "inherit" });
+  try { execSync(`modprobe -r ${DRIVER_MODULE}`, { stdio: "ignore" }); } catch {}
+  execSync(`modprobe ${DRIVER_MODULE}`, { stdio: "inherit" });
+  writeFileSync(DRIVER_MODULES_LOAD_CONF, `${DRIVER_MODULE}\n`);
+
+  return "Predator power driver installed and loaded.";
 }
 
 export function stopConflictingDaemons() {
@@ -232,12 +258,12 @@ export function setPower(pl1: number, pl2: number) {
   safeWrite(join(RAPL_PATH, "constraint_1_power_limit_uw"), String(pl2 * 1_000_000));
 }
 
-// Mapeia nome do perfil para valor do thermal_profile sysfs
-// 0=quiet, 1=balanced, 4=performance
+// Predator power driver thermal_profile values:
+// 0=balanced, 1=quiet, 2=performance, 3=turbo, 4=eco
 const PROFILE_TO_THERMAL: Record<string, string> = {
-  balanced: "1",
-  performance: "4",
-  turbo: "4",
+  balanced: "0",
+  performance: "2",
+  turbo: "3",
 };
 
 export function setPlatform(profile: string) {
@@ -249,7 +275,7 @@ export function setPlatform(profile: string) {
     }
   }
 
-  const path = facerProfilePath();
+  const path = platformProfilePath();
   if (path) {
     const p = PROFILES[profile];
     safeWrite(path, p?.platform || "balanced");
@@ -292,8 +318,8 @@ export function applyProfile(name: string): string {
   }
   stopConflictingDaemons();
 
-  if (!facerLoaded()) {
-    installFacer();
+  if (!driverLoaded()) {
+    installDriver();
   }
 
   setPower(p.pl1, p.pl2);
@@ -416,13 +442,24 @@ export function showStatus() {
   const fanLegacy = safeRead(FAN_BOOST_PATH);
   const turboVal = safeRead(TURBO_OC_PATH);
   const tpVal = safeRead(THERMAL_PROFILE_PATH);
-  const ecPath = facerProfilePath();
-  const ecRaw = ecPath ? safeRead(ecPath) : tpVal || "";
-  const PROFILE_NAMES: Record<string, string> = { "0": "Quiet", "1": "Balanced", "4": "Performance" };
+  const ecPath = platformProfilePath();
+  const ecRaw = tpVal || (ecPath ? safeRead(ecPath) : "");
+  const PROFILE_NAMES: Record<string, string> = {
+    "0": "Balanced",
+    "1": "Quiet",
+    "2": "Performance",
+    "3": "Turbo",
+    "4": "Eco",
+    balanced: "Balanced",
+    "balanced-performance": "Performance",
+    performance: "Performance",
+    quiet: "Quiet",
+    "low-power": "Eco",
+  };
   const ec = PROFILE_NAMES[ecRaw] || (ecRaw ? `Mode ${ecRaw}` : "N/A");
-  const facer = facerLoaded() ? "ACTIVE" : "MISSING";
+  const driver = driverLoaded() ? "ACTIVE" : "MISSING";
   const fan = fanLegacy === "1" ? "ON" : turboVal === "1" ? "TURBO" : "OFF";
-  return { pl1, pl2, fan, ec, facer };
+  return { pl1, pl2, fan, ec, driver };
 }
 
 export function installService(profile = "balanced"): string {

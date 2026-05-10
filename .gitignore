@@ -2,6 +2,14 @@
 dist/
 *.spec
 node_modules/
+*.o
+*.ko
+*.mod
+*.mod.c
+*.cmd
+.tmp_versions/
+Module.symvers
+modules.order
 
 # Generated
 src/embed.ts
