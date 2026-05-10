@@ -17,4 +17,4 @@ default:
 
 clean:
 	rm -rf src/*.o src/*~ src/.*.cmd src/*.ko src/*.mod src/*.mod.c \
-		.tmp_versions modules.order Module.symvers
+		.*.cmd .*.o .*.o.d .tmp_versions modules.order Module.symvers

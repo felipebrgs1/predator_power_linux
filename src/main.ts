@@ -3,16 +3,24 @@ import { execSync } from "child_process";
 import {
   applyProfile,
   setFanBoost,
+  setFanMode,
   showStatus,
+  showFanStatus,
   installDriver,
   driverLoaded,
   installService,
   removeService,
   isRoot,
   ensureRoot,
+  findPackageTempPath,
+  readCpuTemp,
   thermalControl,
   stopThermalControl,
 } from "./power.js";
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function runThermalCLI() {
   const targetTemp = parseInt(process.argv[3] || "80");
@@ -38,6 +46,117 @@ function runThermalCLI() {
   });
 }
 
+function printFanStatus() {
+  const s = showFanStatus();
+  console.log(`Fan mode: ${s.mode} | CPU fan: ${s.cpuRpm} RPM | GPU fan: ${s.gpuRpm} RPM`);
+}
+
+function fanModeApplied(message: string) {
+  return message.includes("applied");
+}
+
+function parseNumberArg(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+async function runFanCLI() {
+  const action = process.argv[3] || "status";
+
+  if (action === "status" || action === "rpm") {
+    printFanStatus();
+    process.exit(0);
+  }
+
+  if (action === "mode") {
+    const mode = parseInt(process.argv[4] || "", 10);
+    if (!ensureRoot(["fan", "mode", String(mode)])) process.exit(0);
+    const result = setFanMode(mode);
+    console.log(result);
+    printFanStatus();
+    process.exit(fanModeApplied(result) ? 0 : 1);
+  }
+
+  if (action === "probe") {
+    const seconds = Math.max(4, parseInt(process.argv[4] || "8", 10));
+    if (!ensureRoot(["fan", "probe", String(seconds)])) process.exit(0);
+    const tempPath = findPackageTempPath();
+
+    const resetFan = () => {
+      try { console.log(setFanMode(1)); } catch {}
+    };
+    process.once("SIGINT", () => { resetFan(); process.exit(130); });
+
+    try {
+      for (const mode of [1, 2]) {
+        const result = setFanMode(mode);
+        console.log(result);
+        if (!fanModeApplied(result)) process.exit(1);
+        for (let elapsed = 0; elapsed < seconds; elapsed += 2) {
+          await sleep(2000);
+          const fan = showFanStatus();
+          const temp = tempPath ? readCpuTemp(tempPath) : null;
+          const tempText = temp === null ? "N/A" : `${temp.toFixed(1)}°C`;
+          console.log(`mode=${mode} t=${elapsed + 2}s temp=${tempText} cpu=${fan.cpuRpm}rpm gpu=${fan.gpuRpm}rpm`);
+        }
+      }
+    } finally {
+      resetFan();
+    }
+    process.exit(0);
+  }
+
+  if (action === "curve") {
+    const turboTemp = parseNumberArg(process.argv[4], 75);
+    const autoTemp = parseNumberArg(process.argv[5], 65);
+    if (!ensureRoot(["fan", "curve", String(turboTemp), String(autoTemp)])) process.exit(0);
+    if (autoTemp >= turboTemp) {
+      console.error("Invalid curve: auto temperature must be lower than turbo temperature.");
+      process.exit(1);
+    }
+
+    const tempPath = findPackageTempPath();
+    if (!tempPath) {
+      console.error("CPU temperature sensor not found.");
+      process.exit(1);
+    }
+
+    let mode = 1;
+    const resetFan = () => {
+      try { console.log("\n" + setFanMode(1)); } catch {}
+    };
+    process.once("SIGINT", () => { resetFan(); process.exit(130); });
+
+    const initial = setFanMode(mode);
+    console.log(initial);
+    if (!fanModeApplied(initial)) process.exit(1);
+    console.log(`Fan curve active: turbo >= ${turboTemp}°C, auto <= ${autoTemp}°C. Press Ctrl+C to stop.`);
+
+    while (true) {
+      const temp = readCpuTemp(tempPath);
+      if (temp !== null) {
+        if (mode === 1 && temp >= turboTemp) {
+          const result = setFanMode(2);
+          console.log("\n" + result);
+          if (fanModeApplied(result)) mode = 2;
+        } else if (mode === 2 && temp <= autoTemp) {
+          const result = setFanMode(1);
+          console.log("\n" + result);
+          if (fanModeApplied(result)) mode = 1;
+        }
+      }
+
+      const fan = showFanStatus();
+      const tempText = temp === null ? "N/A" : `${temp.toFixed(1)}°C`;
+      process.stdout.write(`\rtemp=${tempText} mode=${mode} cpu=${fan.cpuRpm}rpm gpu=${fan.gpuRpm}rpm turbo>=${turboTemp} auto<=${autoTemp}  `);
+      await sleep(2000);
+    }
+  }
+
+  console.log("Use: predator-power fan status | fan mode <1|2> | fan probe [seconds] | fan curve [turboTemp] [autoTemp]");
+  process.exit(1);
+}
+
 const cmd = process.argv[2];
 if (cmd === "service") {
   const action = process.argv[3];
@@ -53,6 +172,12 @@ if (cmd === "service") {
   process.exit(0);
 } else if (cmd === "thermal") {
   runThermalCLI();
+} else if (cmd === "fan") {
+  await runFanCLI();
+} else if (cmd === "driver") {
+  if (!ensureRoot(["driver"])) process.exit(0);
+  try { console.log(installDriver()); } catch (e: any) { console.error("Error:", e.message || e); process.exit(1); }
+  process.exit(0);
 }
 
 let cpuNameCached = "Unknown";
@@ -74,7 +199,7 @@ function draw() {
     "\x1Bc" +
     `  PREDATOR POWER MANAGER\n` +
     `  CPU: ${cpuNameCached}\n` +
-    `  PL1: ${s.pl1}W  PL2: ${s.pl2}W  Fan: ${s.fan}  Mode: ${s.ec}\n` +
+    `  PL1: ${s.pl1}W  PL2: ${s.pl2}W  Fan: ${s.fan}  RPM: ${s.fanRpm}  Mode: ${s.ec}\n` +
     `  Driver: ${driver ? "ACTIVE" : "MISSING"}\n` +
     warn +
     `\n` +

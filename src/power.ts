@@ -12,6 +12,9 @@ const DRIVER_DIR = "/usr/src/predator-power-driver";
 const DRIVER_MODULES_LOAD_CONF = `/etc/modules-load.d/${DRIVER_MODULE}.conf`;
 const POWER_DEVICE_DIR = "/sys/devices/platform/predator-power";
 const FAN_BOOST_PATH = `${POWER_DEVICE_DIR}/fan_boost`;
+const FAN_MODE_PATH = `${POWER_DEVICE_DIR}/fan_mode`;
+const CPU_FAN_RPM_PATH = `${POWER_DEVICE_DIR}/cpu_fan_rpm`;
+const GPU_FAN_RPM_PATH = `${POWER_DEVICE_DIR}/gpu_fan_rpm`;
 const THERMAL_PROFILE_PATH = `${POWER_DEVICE_DIR}/thermal_profile`;
 const TURBO_OC_PATH = `${POWER_DEVICE_DIR}/turbo_oc`;
 const LEGACY_FACER_DIR = "/opt/turbo-fan";
@@ -25,6 +28,14 @@ export const PROFILES: Record<string, { pl1: number; pl2: number; platform: stri
 };
 
 let vendorDir: string | null = null;
+
+function shouldCopyDriverFile(rel: string): boolean {
+  const name = rel.split(/[\\/]/).pop() || rel;
+  if (rel.split(/[\\/]/).some((part) => part.startsWith("."))) return false;
+  if (name === "Module.symvers" || name === "modules.order") return false;
+  if (/\.(o|ko|mod|mod\.c|cmd|o\.d)$/.test(name)) return false;
+  return true;
+}
 
 export function isRoot() {
   return process.getuid?.() === 0;
@@ -155,6 +166,8 @@ export function installDriver(): string {
     for (const entry of readdirSync(from)) {
       const srcPath = join(from, entry);
       const dstPath = join(to, entry);
+      const rel = relative(src, srcPath);
+      if (!shouldCopyDriverFile(rel)) continue;
       const st = statSync(srcPath);
       if (st.isDirectory()) {
         mkdirSync(dstPath, { recursive: true });
@@ -309,6 +322,33 @@ export function setFanBoost(on: boolean) {
   }
 }
 
+export function setFanMode(mode: number): string {
+  if (!Number.isInteger(mode) || mode < 1 || mode > 2) {
+    return "Invalid fan mode. Use 1=auto or 2=turbo.";
+  }
+
+  if (!driverLoaded() || !existsSync(FAN_MODE_PATH)) {
+    installDriver();
+  }
+
+  if (!existsSync(FAN_MODE_PATH)) {
+    return `Fan mode control not found: ${FAN_MODE_PATH}`;
+  }
+
+  if (!safeWrite(FAN_MODE_PATH, String(mode))) {
+    return `Failed to set fan mode ${mode}.`;
+  }
+
+  return `Fan mode ${mode} applied.`;
+}
+
+export function showFanStatus() {
+  const mode = safeRead(FAN_MODE_PATH) || "N/A";
+  const cpuRpm = safeRead(CPU_FAN_RPM_PATH) || "N/A";
+  const gpuRpm = safeRead(GPU_FAN_RPM_PATH) || "N/A";
+  return { mode, cpuRpm, gpuRpm };
+}
+
 export function applyProfile(name: string): string {
   const p = PROFILES[name];
   if (!p) return `Unknown profile: ${name}`;
@@ -442,6 +482,7 @@ export function showStatus() {
   const fanLegacy = safeRead(FAN_BOOST_PATH);
   const turboVal = safeRead(TURBO_OC_PATH);
   const tpVal = safeRead(THERMAL_PROFILE_PATH);
+  const fanStatus = showFanStatus();
   const ecPath = platformProfilePath();
   const ecRaw = tpVal || (ecPath ? safeRead(ecPath) : "");
   const PROFILE_NAMES: Record<string, string> = {
@@ -459,7 +500,8 @@ export function showStatus() {
   const ec = PROFILE_NAMES[ecRaw] || (ecRaw ? `Mode ${ecRaw}` : "N/A");
   const driver = driverLoaded() ? "ACTIVE" : "MISSING";
   const fan = fanLegacy === "1" ? "ON" : turboVal === "1" ? "TURBO" : "OFF";
-  return { pl1, pl2, fan, ec, driver };
+  const fanRpm = fanStatus.cpuRpm === "N/A" && fanStatus.gpuRpm === "N/A" ? "N/A" : `CPU ${fanStatus.cpuRpm} GPU ${fanStatus.gpuRpm}`;
+  return { pl1, pl2, fan, fanRpm, ec, driver };
 }
 
 export function installService(profile = "balanced"): string {

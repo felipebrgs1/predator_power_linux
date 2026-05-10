@@ -25,6 +25,11 @@ Teclas: **1 2 3** = perfis, **F** = fan/turbo, **D** = instalar driver, **S** = 
 predator-power profile balanced    # 50W/65W
 predator-power profile performance # 75W/100W
 predator-power profile turbo      # 100W/140W + Turbo OC
+predator-power fan status         # modo e RPM das ventoinhas
+predator-power fan mode 2         # 1=auto, 2=turbo
+predator-power fan probe 8        # testa modos 1/2 por 8s cada
+predator-power fan curve 75 65    # turbo >=75°C, auto <=65°C
+predator-power driver             # reinstala/recarrega o driver
 predator-power service            # ativar boot automático
 predator-power service remove     # remover boot
 ```
@@ -51,3 +56,14 @@ O projeto usa um driver próprio e mínimo, sem RGB de teclado:
 - boot: `/etc/modules-load.d/predator_power.conf`
 
 O botão **D** instala o módulo, remove o serviço legado `turbo-fan` se existir e deixa o driver carregando automaticamente no boot.
+
+Sysfs exposto pelo driver:
+
+- `thermal_profile`
+- `turbo_oc`
+- `fan_boost`
+- `fan_mode`
+- `cpu_fan_rpm`
+- `gpu_fan_rpm`
+
+`fan_mode` usa `1=auto` e `2=turbo`. O modo `3` foi bloqueado porque zerou as ventoinhas no teste real.

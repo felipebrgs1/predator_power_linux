@@ -24,6 +24,7 @@
 #define PREDATOR_WMID_GUID "7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56"
 
 #define PREDATOR_WMID_SET_GAMING_LED_METHODID          2
+#define PREDATOR_WMID_GET_GAMING_SYS_INFO_METHODID     5
 #define PREDATOR_WMID_SET_GAMING_FAN_BEHAVIOR          14
 #define PREDATOR_WMID_SET_GAMING_MISC_SETTING_METHODID 22
 #define PREDATOR_WMID_GET_GAMING_MISC_SETTING_METHODID 23
@@ -31,6 +32,11 @@
 #define PREDATOR_MISC_SETTING_STATUS_MASK GENMASK_ULL(7, 0)
 #define PREDATOR_MISC_SETTING_INDEX_MASK  GENMASK_ULL(7, 0)
 #define PREDATOR_MISC_SETTING_VALUE_MASK  GENMASK_ULL(15, 8)
+
+#define PREDATOR_FAN_SPEED_READ_MASK GENMASK(20, 8)
+
+#define PREDATOR_CMD_GET_CPU_FAN_SPEED 0x0201
+#define PREDATOR_CMD_GET_GPU_FAN_SPEED 0x0601
 
 #define PREDATOR_MISC_SETTING_PLATFORM_PROFILE 0x0B
 
@@ -45,6 +51,7 @@ enum predator_thermal_profile {
 static struct platform_device *predator_power_device;
 static bool turbo_state;
 static bool fan_boost_state;
+static u8 fan_mode_state = 1;
 static u8 thermal_profile_state = PREDATOR_PROFILE_BALANCED;
 
 static unsigned int cpu_fans = 1;
@@ -210,6 +217,21 @@ static int predator_set_fan_mode(u8 fan_mode)
 				    fan_config2 | (fan_config1 << 16), NULL);
 }
 
+static int predator_get_fan_speed(unsigned int fan)
+{
+	u64 fan_speed = 0;
+	u64 command = fan == 0 ? PREDATOR_CMD_GET_CPU_FAN_SPEED :
+				 PREDATOR_CMD_GET_GPU_FAN_SPEED;
+	int err;
+
+	err = predator_wmi_eval_u64(PREDATOR_WMID_GET_GAMING_SYS_INFO_METHODID,
+				    command, &fan_speed);
+	if (err)
+		return err;
+
+	return FIELD_GET(PREDATOR_FAN_SPEED_READ_MASK, fan_speed);
+}
+
 static int predator_set_oc(bool enable)
 {
 	int err = 0;
@@ -245,6 +267,7 @@ static int predator_set_turbo(bool enable)
 
 	turbo_state = enable;
 	fan_boost_state = enable;
+	fan_mode_state = enable ? 2 : 1;
 	return 0;
 }
 
@@ -305,6 +328,61 @@ static ssize_t turbo_oc_store(struct device *dev,
 }
 static DEVICE_ATTR_RW(turbo_oc);
 
+static ssize_t fan_mode_show(struct device *dev,
+			     struct device_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", fan_mode_state);
+}
+
+static ssize_t fan_mode_store(struct device *dev,
+			      struct device_attribute *attr,
+			      const char *buf, size_t count)
+{
+	unsigned int mode;
+	int err;
+
+	err = kstrtouint(buf, 0, &mode);
+	if (err)
+		return err;
+
+	/* Known safe values: 1=auto, 2=turbo. Mode 3 stops the fans on tested hardware. */
+	if (mode < 1 || mode > 2)
+		return -EINVAL;
+
+	err = predator_set_fan_mode(mode);
+	if (err)
+		return err;
+
+	fan_mode_state = mode;
+	fan_boost_state = mode != 1;
+	return count;
+}
+static DEVICE_ATTR_RW(fan_mode);
+
+static ssize_t cpu_fan_rpm_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	int rpm = predator_get_fan_speed(0);
+
+	if (rpm < 0)
+		return rpm;
+
+	return sysfs_emit(buf, "%d\n", rpm);
+}
+static DEVICE_ATTR_RO(cpu_fan_rpm);
+
+static ssize_t gpu_fan_rpm_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	int rpm = predator_get_fan_speed(1);
+
+	if (rpm < 0)
+		return rpm;
+
+	return sysfs_emit(buf, "%d\n", rpm);
+}
+static DEVICE_ATTR_RO(gpu_fan_rpm);
+
 static ssize_t fan_boost_show(struct device *dev,
 			      struct device_attribute *attr, char *buf)
 {
@@ -327,6 +405,7 @@ static ssize_t fan_boost_store(struct device *dev,
 		return err;
 
 	fan_boost_state = enable;
+	fan_mode_state = enable ? 2 : 1;
 	return count;
 }
 static DEVICE_ATTR_RW(fan_boost);
@@ -347,8 +426,26 @@ static int predator_power_probe(struct platform_device *pdev)
 	if (err)
 		goto remove_turbo_oc;
 
+	err = device_create_file(&pdev->dev, &dev_attr_fan_mode);
+	if (err)
+		goto remove_fan_boost;
+
+	err = device_create_file(&pdev->dev, &dev_attr_cpu_fan_rpm);
+	if (err)
+		goto remove_fan_mode;
+
+	err = device_create_file(&pdev->dev, &dev_attr_gpu_fan_rpm);
+	if (err)
+		goto remove_cpu_fan_rpm;
+
 	return 0;
 
+remove_cpu_fan_rpm:
+	device_remove_file(&pdev->dev, &dev_attr_cpu_fan_rpm);
+remove_fan_mode:
+	device_remove_file(&pdev->dev, &dev_attr_fan_mode);
+remove_fan_boost:
+	device_remove_file(&pdev->dev, &dev_attr_fan_boost);
 remove_turbo_oc:
 	device_remove_file(&pdev->dev, &dev_attr_turbo_oc);
 remove_thermal_profile:
@@ -358,6 +455,9 @@ remove_thermal_profile:
 
 static void predator_power_remove_files(struct platform_device *pdev)
 {
+	device_remove_file(&pdev->dev, &dev_attr_gpu_fan_rpm);
+	device_remove_file(&pdev->dev, &dev_attr_cpu_fan_rpm);
+	device_remove_file(&pdev->dev, &dev_attr_fan_mode);
 	device_remove_file(&pdev->dev, &dev_attr_fan_boost);
 	device_remove_file(&pdev->dev, &dev_attr_turbo_oc);
 	device_remove_file(&pdev->dev, &dev_attr_thermal_profile);

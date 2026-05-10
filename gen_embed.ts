@@ -4,6 +4,15 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import { join, relative } from "path";
 
+function shouldSkip(rel: string): boolean {
+  const name = rel.split(/[\\/]/).pop() || rel;
+  if (rel.split(/[\\/]/).some((part) => part.startsWith("."))) return true;
+  if (name === "Module.symvers" || name === "modules.order") return true;
+  if (/\.(o|ko|mod|mod\.c|cmd|o\.d)$/.test(name)) return true;
+  if (name.endsWith(".webp")) return true;
+  return false;
+}
+
 function walk(dir: string, base = dir): Record<string, string> {
   const out: Record<string, string> = {};
   for (const entry of readdirSync(dir)) {
@@ -11,9 +20,9 @@ function walk(dir: string, base = dir): Record<string, string> {
     const rel = relative(base, full);
     const st = statSync(full);
     if (st.isDirectory()) {
-      Object.assign(out, walk(full, base));
+      if (!shouldSkip(rel)) Object.assign(out, walk(full, base));
     } else if (st.isFile()) {
-      if (full.endsWith(".webp")) continue;
+      if (shouldSkip(rel)) continue;
       try {
         out[rel] = readFileSync(full, "utf-8");
       } catch {
