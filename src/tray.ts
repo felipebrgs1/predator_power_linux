@@ -16,10 +16,10 @@ const WATCHER_PATH = "/StatusNotifierWatcher";
 const WATCHER_IFACE = "org.kde.StatusNotifierWatcher";
 
 const ICONS: Record<string, string> = {
-  balanced: "power-profile-balanced",
-  performance: "power-profile-performance",
-  turbo: "power-profile-performance",
-  fallback: "preferences-system-power",
+  balanced: "battery-000-profile-balanced",
+  performance: "battery-000-profile-performance",
+  turbo: "cpu",
+  fallback: "computer",
 };
 
 function currentProfileFromStatus(): string {
@@ -187,15 +187,15 @@ function buildMenuProps(): Map<number, Map<string, any>> {
 
   const items: [number, any][] = [
     [0, { "type": new Variant("s", "standard"), "label": new Variant("s", "Predator Power"), "enabled": new Variant("b", false), "visible": new Variant("b", true), "children-display": new Variant("s", "submenu") }],
-    [1, { "label": new Variant("s", "Balanced  (50W / 65W)"), "enabled": new Variant("b", true), "visible": new Variant("b", true), "toggle-type": new Variant("s", "radio"), "toggle-state": new Variant("i", profile === "balanced" ? 1 : 0), "icon-name": new Variant("s", "power-profile-balanced") }],
-    [2, { "label": new Variant("s", "Performance  (75W / 100W)"), "enabled": new Variant("b", true), "visible": new Variant("b", true), "toggle-type": new Variant("s", "radio"), "toggle-state": new Variant("i", profile === "performance" ? 1 : 0), "icon-name": new Variant("s", "power-profile-performance") }],
-    [3, { "label": new Variant("s", "Turbo  (100W / 140W + OC)"), "enabled": new Variant("b", true), "visible": new Variant("b", true), "toggle-type": new Variant("s", "radio"), "toggle-state": new Variant("i", profile === "turbo" ? 1 : 0), "icon-name": new Variant("s", "power-profile-performance") }],
+    [1, { "label": new Variant("s", "Balanced  (50W / 65W)"), "enabled": new Variant("b", true), "visible": new Variant("b", true), "toggle-type": new Variant("s", "radio"), "toggle-state": new Variant("i", profile === "balanced" ? 1 : 0), "icon-name": new Variant("s", "battery-000-profile-balanced") }],
+    [2, { "label": new Variant("s", "Performance  (75W / 100W)"), "enabled": new Variant("b", true), "visible": new Variant("b", true), "toggle-type": new Variant("s", "radio"), "toggle-state": new Variant("i", profile === "performance" ? 1 : 0), "icon-name": new Variant("s", "battery-000-profile-performance") }],
+    [3, { "label": new Variant("s", "Turbo  (100W / 140W + OC)"), "enabled": new Variant("b", true), "visible": new Variant("b", true), "toggle-type": new Variant("s", "radio"), "toggle-state": new Variant("i", profile === "turbo" ? 1 : 0), "icon-name": new Variant("s", "cpu") }],
     [10, { "type": new Variant("s", "separator"), "visible": new Variant("b", true) }],
-    [5, { "label": new Variant("s", "Fan: Auto"), "enabled": new Variant("b", true), "visible": new Variant("b", true), "toggle-type": new Variant("s", "radio"), "toggle-state": new Variant("i", !isFanTurbo ? 1 : 0) }],
-    [6, { "label": new Variant("s", "Fan: Turbo"), "enabled": new Variant("b", true), "visible": new Variant("b", true), "toggle-type": new Variant("s", "radio"), "toggle-state": new Variant("i", isFanTurbo ? 1 : 0) }],
+    [5, { "label": new Variant("s", "Fan: Auto"), "enabled": new Variant("b", true), "visible": new Variant("b", true), "toggle-type": new Variant("s", "radio"), "toggle-state": new Variant("i", !isFanTurbo ? 1 : 0), "icon-name": new Variant("s", "battery-000-profile-powersave") }],
+    [6, { "label": new Variant("s", "Fan: Turbo"), "enabled": new Variant("b", true), "visible": new Variant("b", true), "toggle-type": new Variant("s", "radio"), "toggle-state": new Variant("i", isFanTurbo ? 1 : 0), "icon-name": new Variant("s", "cpu") }],
     [11, { "type": new Variant("s", "separator"), "visible": new Variant("b", true) }],
-    [7, { "label": new Variant("s", "Mostrar status"), "enabled": new Variant("b", true), "visible": new Variant("b", true), "icon-name": new Variant("s", "dialog-information") }],
-    [8, { "label": new Variant("s", "Sair da bandeja"), "enabled": new Variant("b", true), "visible": new Variant("b", true), "icon-name": new Variant("s", "application-exit") }],
+    [7, { "label": new Variant("s", `CPU: ${fan.cpuRpm} RPM`), "enabled": new Variant("b", false), "visible": new Variant("b", true), "icon-name": new Variant("s", "cpu") }],
+    [8, { "label": new Variant("s", `GPU: ${fan.gpuRpm} RPM`), "enabled": new Variant("b", false), "visible": new Variant("b", true), "icon-name": new Variant("s", "video-display") }],
   ];
   const map = new Map<number, Map<string, any>>();
   for (const [id, props] of items) {
@@ -269,17 +269,8 @@ class DBusMenu extends Interface {
     else if (id === 3) { runProfileAction("turbo"); notify("Predator Power", "Perfil Turbo aplicado"); }
     else if (id === 5) { runFanMode(1); notify("Predator Power", "Fan: Auto"); }
     else if (id === 6) { runFanMode(2); notify("Predator Power", "Fan: Turbo"); }
-    else if (id === 7) {
-      try {
-        const s = showStatus();
-        const f = showFanStatus();
-        notify("Predator Power", `PL1 ${s.pl1}W PL2 ${s.pl2}W | ${s.ec} | Fan ${f.mode} CPU ${f.cpuRpm} GPU ${f.gpuRpm}`);
-      } catch {}
-    }
-    else if (id === 8) {
-      notify("Predator Power", "Saindo da bandeja");
-      setTimeout(() => process.exit(0), 300);
-    }
+    // 7 e 8 são só info (CPU/GPU RPM), não clicáveis
+    else if (id === 7 || id === 8) { return; }
     // bump revision for next layout
     menuRevision++;
     // força refresh rápido (pkexec é assíncrono, hardware muda em ~1s)
@@ -331,7 +322,7 @@ export function installTrayAutostart() {
 Name=Predator Power Tray
 Comment=Controle de TDP e perfis Predator na bandeja
 Exec=${execLine}
-Icon=preferences-system-power
+Icon=cpu
 Type=Application
 Categories=System;Settings;
 X-GNOME-Autostart-enabled=true
@@ -401,7 +392,9 @@ export async function startTray() {
   let lastProfile = currentProfileFromStatus();
   let lastIcon = iconForProfile(lastProfile);
   let lastFanMode = "";
-  try { lastFanMode = showFanStatus().mode; } catch {}
+  let lastCpuRpm = "";
+  let lastGpuRpm = "";
+  try { const ff = showFanStatus(); lastFanMode = ff.mode; lastCpuRpm = ff.cpuRpm; lastGpuRpm = ff.gpuRpm; } catch {}
 
   function updateIfNeeded() {
     const profile = currentProfileFromStatus();
@@ -418,17 +411,18 @@ export async function startTray() {
       try { (sni as any).NewIcon(); } catch {}
       changed = true;
     }
-    if (profile !== lastProfile || icon !== lastIcon || fanMode !== lastFanMode) {
+    const rpmChanged = f.cpuRpm !== lastCpuRpm || f.gpuRpm !== lastGpuRpm;
+    if (profile !== lastProfile || icon !== lastIcon || fanMode !== lastFanMode || rpmChanged) {
       (sni as any).ToolTip = tooltip as any;
       (Interface as any).emitPropertiesChanged(sni, { ToolTip: tooltip });
       try { (sni as any).NewToolTip(); } catch {}
       // menu items changed -> notify layout
       menuRevision++;
       try { (menu as any).LayoutUpdated(menuRevision, 0); } catch {}
-      // batch property update for menu radios
+      // batch property update for menu radios + RPM labels
       try {
         const updated: any[] = [];
-        for (const id of [1, 2, 3, 5, 6]) {
+        for (const id of [1, 2, 3, 5, 6, 7, 8]) {
           const props = buildMenuProps().get(id);
           if (props) {
             const dict: any = {};
@@ -443,6 +437,8 @@ export async function startTray() {
     lastProfile = profile;
     lastIcon = icon;
     lastFanMode = fanMode;
+    lastCpuRpm = f.cpuRpm;
+    lastGpuRpm = f.gpuRpm;
     if (changed) {
       // console.log(`[tray] update -> ${profile} icon ${icon} fan ${fanMode}`);
     }
