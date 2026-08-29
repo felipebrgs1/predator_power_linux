@@ -158,7 +158,47 @@ async function runFanCLI() {
 }
 
 const cmd = process.argv[2];
-if (cmd === "service") {
+// global help
+if (cmd === "--help" || cmd === "-h" || cmd === "help") {
+  console.log(`Predator Power Manager
+Uso:
+  predator-power                # TUI interativa (precisa TTY)
+  predator-power tui            # alias TUI
+  predator-power tray           # bandeja KDE (Plasma 6 Wayland/X11)
+  predator-power tray --autostart
+  predator-power profile <balanced|performance|turbo>
+  predator-power fan <status|mode|probe|curve>
+  predator-power driver
+  predator-power service [profile|remove]
+  predator-power thermal [target maxPL minPL]`);
+  process.exit(0);
+}
+if (cmd === "tui") {
+  // fall through to TUI below
+} else if (cmd === "tray") {
+  const sub = process.argv[3];
+  if (sub === "--autostart" || sub === "autostart") {
+    const { installTrayAutostart } = await import("./tray.js");
+    const p = installTrayAutostart();
+    console.log(`Autostart instalado: ${p}`);
+    process.exit(0);
+  }
+  if (sub === "--no-autostart" || sub === "no-autostart" || sub === "remove-autostart") {
+    const { removeTrayAutostart } = await import("./tray.js");
+    const p = removeTrayAutostart();
+    console.log(`Autostart removido: ${p}`);
+    process.exit(0);
+  }
+  if (sub === "--help" || sub === "help") {
+    console.log(`Uso: predator-power tray [--autostart|--no-autostart]
+  Inicia na bandeja do sistema (KDE Plasma).
+  --autostart   instala ~/.config/autostart/predator-power-tray.desktop
+  --no-autostart remove o autostart`);
+    process.exit(0);
+  }
+  const { startTray } = await import("./tray.js");
+  await startTray();
+} else if (cmd === "service") {
   const action = process.argv[3];
   if (action === "remove") {
     console.log(removeService());
@@ -217,9 +257,15 @@ function restore() {
 }
 
 function main() {
-  if (cmd === "thermal") return;
+  if (cmd === "thermal" || cmd === "tray") return;
+  if (cmd === "tui") { /* allow TUI via explicit arg */ }
+  else if (cmd && ![undefined].includes(cmd as any) && !["tui"].includes(cmd)) {
+    // unknown cmd already handled above, but if we reach here with profile/fan etc, they would have exited
+    // so only TUI remains
+    if (![undefined, "tui"].includes(cmd as any)) return;
+  }
   if (!process.stdin.isTTY) {
-    console.log("Not a TTY. Use: predator-power profile <name>");
+    console.log("Not a TTY. Use: predator-power profile <name> | predator-power tray | predator-power --help");
     process.exit(1);
   }
   try { process.stdin.setRawMode(true); } catch {}

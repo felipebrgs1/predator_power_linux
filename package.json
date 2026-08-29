@@ -5,12 +5,17 @@
   "type": "module",
   "scripts": {
     "dev": "bun run src/main.ts",
+    "dev:tray": "bun run src/main.ts tray",
     "embed": "bun run gen_embed.ts",
     "build": "bun run embed && bun build --compile src/main.ts --outfile dist/predator-power",
     "clean": "rm -rf dist src/embed.ts"
   },
   "dependencies": {
-    "@opentui/core": "^0.1.99"
+    "@opentui/core": "^0.1.99",
+    "dbus-next": "^0.10.2",
+    "debug": "^4.4.3",
+    "x11": "^4.1.0",
+    "xml2js": "^0.6.2"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -1,8 +1,8 @@
 [Desktop Entry]
-Name=TDP Manager
-Comment=Intel CPU Power Limit Manager
+Name=Predator Power
+Comment=Controle de TDP e perfis Acer Predator
 GenericName=Power Manager
-Exec=sh -c "$HOME/predator_power_linux/dist/predator-power tui"
+Exec=predator-power tray
 Icon=preferences-system-power
 Terminal=true
 Type=Application

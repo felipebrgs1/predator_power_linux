@@ -14,7 +14,29 @@ sudo cp dist/predator-power /usr/local/bin/
 
 ## Uso
 
-### Interface interativa
+### Bandeja do sistema (KDE Plasma 6 - Wayland/X11)
+```bash
+predator-power tray                 # inicia na bandeja (ícone perto do relógio)
+predator-power tray --autostart     # iniciar automaticamente com o sistema
+predator-power tray --no-autostart  # remover autostart
+```
+Menu da bandeja:
+- **Balanced / Performance / Turbo** (radio, mostra perfil ativo)
+- **Fan: Auto / Turbo**
+- **Mostrar status** (notificação com PL1/PL2, RPM)
+- **Sair da bandeja**
+
+> A troca de perfil usa `pkexec` e vai pedir senha. O ícone e tooltip atualizam a cada 2s.
+
+Instalação do autostart + ícone:
+```bash
+bun run build
+sudo cp dist/predator-power /usr/local/bin/
+cp predator-power-tray.desktop ~/.config/autostart/
+# ou: predator-power tray --autostart
+```
+
+### Interface interativa (TUI)
 ```bash
 sudo predator-power
 ```
@@ -32,6 +54,7 @@ predator-power fan curve 75 65    # turbo >=75°C, auto <=65°C
 predator-power driver             # reinstala/recarrega o driver
 predator-power service            # ativar boot automático
 predator-power service remove     # remover boot
+predator-power tray               # modo bandeja KDE
 ```
 
 ## Perfis

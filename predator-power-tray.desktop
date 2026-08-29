@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Predator Power Tray
+Comment=Controle de TDP e perfis Predator na bandeja (KDE Plasma)
+GenericName=Power Manager Tray
+Exec=predator-power tray
+Icon=preferences-system-power
+Type=Application
+Categories=System;Settings;HardwareSettings;
+Keywords=tdp;power;cpu;predator;performance;
+StartupNotify=false
+Terminal=false
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel
